@@ -1,0 +1,83 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+.venv/
+venv/
+env/
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# local OS/editor clutter
+Thumbs.db
+
+# generated data and reports
+data/raw/
+data/interim/
+data/processed/questions_clean.csv
+data/processed/questions_clean_v2.csv
+data/processed/questions_normalized.csv
+data/processed/questions_normalized_v2.csv
+data/processed/questions_with_features.csv
+data/processed/resumes_clean.csv
+data/processed/resumes_normalized_cleaned.csv
+data/processed/resumes_normalized_salesfixed.csv
+data/processed/resume_profiles_clean.csv
+data/processed/resume_profiles_normalized.csv
+data/processed/resume_skills.csv
+data/processed/training_pairs.csv
+data/processed/training_pairs_v2.csv
+
+# old or optional model artifacts
+models/question_type_model_source_holdout.joblib
+models/question_type_model_text_only.joblib
+models/resume_category_model_best_*.joblib
+
+# local review files
+sales_confusion_review.csv
+sales_confusion_review_labeled.csv
+software_engineering_flagged_for_relabel.csv
+
+
