@@ -19,13 +19,62 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import InterviewCameraCoach from "@/components/ui/InterviewCameraCoach";
+import type {
+  InterviewFeedbackEntry,
+  InterviewSessionFeedback,
+  LiveInterviewFeedback,
+  VisualMetrics,
+} from "@/lib/interview-feedback";
+import { buildSessionInterviewFeedback } from "@/lib/interview-feedback";
 
 type Message = {
   role: "interviewer" | "candidate";
   text: string;
 };
 
-type SpeechRecognitionType = any;
+type SpeechRecognitionAlternative = {
+  transcript: string;
+};
+
+type SpeechRecognitionResult = {
+  isFinal: boolean;
+  0: SpeechRecognitionAlternative;
+};
+
+type SpeechRecognitionResultList = {
+  length: number;
+  [index: number]: SpeechRecognitionResult;
+};
+
+type SpeechRecognitionEvent = {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+};
+
+type SpeechRecognitionErrorEvent = {
+  error?: string;
+};
+
+type SpeechRecognitionInstance = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
 
 export default function InterviewPage() {
   const [questions, setQuestions] = useState<string[]>([]);
@@ -39,9 +88,41 @@ export default function InterviewPage() {
   const [isListening, setIsListening] = useState(false);
   const [isInterviewerSpeaking, setIsInterviewerSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [visualMetrics, setVisualMetrics] = useState<VisualMetrics | null>(null);
 
   const finalTranscriptRef = useRef("");
-  const recognitionRef = useRef<SpeechRecognitionType | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+
+  const persistSessionFeedback = (
+    nextEntry: InterviewFeedbackEntry,
+  ): InterviewSessionFeedback | null => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const savedEntries = localStorage.getItem("interviewFeedbackEntries");
+    let entries: InterviewFeedbackEntry[] = [];
+
+    if (savedEntries) {
+      try {
+        entries = JSON.parse(savedEntries) as InterviewFeedbackEntry[];
+      } catch (error) {
+        console.error("Could not parse saved interview feedback entries:", error);
+      }
+    }
+
+    const nextEntries = [...entries, nextEntry];
+    const sessionFeedback = buildSessionInterviewFeedback(nextEntries);
+
+    localStorage.setItem("interviewFeedbackEntries", JSON.stringify(nextEntries));
+
+    if (sessionFeedback) {
+      localStorage.setItem("interviewSessionFeedback", JSON.stringify(sessionFeedback));
+      localStorage.setItem("latestInterviewFeedback", JSON.stringify(sessionFeedback));
+    }
+
+    return sessionFeedback;
+  };
 
   useEffect(() => {
     const savedQuestions = localStorage.getItem("questions");
@@ -57,8 +138,8 @@ export default function InterviewPage() {
     if (typeof window === "undefined") return;
 
     const SpeechRecognitionClass =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition;
 
     if (!SpeechRecognitionClass) {
       console.log("Speech recognition is not supported in this browser.");
@@ -78,12 +159,12 @@ export default function InterviewPage() {
       setIsListening(false);
     };
 
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error("Speech recognition error:", event?.error);
       setIsListening(false);
     };
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interimTranscript = "";
       let newFinalPart = "";
 
@@ -151,6 +232,15 @@ export default function InterviewPage() {
     finalTranscriptRef.current = "";
     setAnswer("");
     setFollowUpPrompt(null);
+
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("latestInterviewAnswer");
+      localStorage.removeItem("latestInterviewQuestion");
+      localStorage.removeItem("latestInterviewReply");
+      localStorage.removeItem("latestInterviewFeedback");
+      localStorage.removeItem("interviewFeedbackEntries");
+      localStorage.removeItem("interviewSessionFeedback");
+    }
 
     const openingLine = `Welcome. Let's begin. ${questions[0]}`;
 
@@ -250,6 +340,7 @@ export default function InterviewPage() {
           conversation: updatedConversation,
           currentQuestion,
           interviewType,
+          visualMetrics,
         }),
       });
 
@@ -271,6 +362,7 @@ export default function InterviewPage() {
 
       const interviewerReply =
         data.reply || "Can you give me a more specific example?";
+      const feedback = (data.feedback || null) as LiveInterviewFeedback | null;
 
       const finalConversation: Message[] = [
         ...updatedConversation,
@@ -282,6 +374,23 @@ export default function InterviewPage() {
 
       finalTranscriptRef.current = "";
       setAnswer("");
+
+      if (typeof window !== "undefined" && feedback) {
+        const entry: InterviewFeedbackEntry = {
+          question: currentQuestion,
+          answer: currentAnswer,
+          feedback,
+        };
+        const sessionFeedback = persistSessionFeedback(entry);
+
+        localStorage.setItem("latestInterviewAnswer", currentAnswer);
+        localStorage.setItem("latestInterviewQuestion", currentQuestion);
+        localStorage.setItem("latestInterviewReply", interviewerReply);
+        localStorage.setItem(
+          "latestInterviewFeedback",
+          JSON.stringify(sessionFeedback || feedback),
+        );
+      }
 
       await speakText(interviewerReply);
     } catch (error) {
@@ -490,7 +599,10 @@ export default function InterviewPage() {
               </div>
 
               <div className="flex-1 rounded-[1.75rem] border border-slate-800 bg-slate-900 p-5">
-                <InterviewCameraCoach />
+                <InterviewCameraCoach
+                  trackingActive={isListening}
+                  onMetricsChange={setVisualMetrics}
+                />
 
                 <div className="mt-5 max-h-[260px] space-y-3 overflow-y-auto">
                   {conversation.length === 0 ? (

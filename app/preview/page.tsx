@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -122,12 +122,6 @@ export default function PreviewPage() {
   const demoQuestions = useMemo(() => {
     return questionSets[interviewType];
   }, [interviewType]);
-
-  useEffect(() => {
-    setAnswers(Array(demoQuestions.length).fill(""));
-    setCurrentQuestion(0);
-    setShowFeedback(false);
-  }, [demoQuestions]);
 
   const progressValue = ((currentQuestion + 1) / demoQuestions.length) * 100;
 
@@ -379,7 +373,12 @@ export default function PreviewPage() {
                 <button
                   key={item}
                   type="button"
-                  onClick={() => setInterviewType(item)}
+                  onClick={() => {
+                    setInterviewType(item);
+                    setAnswers(Array(questionSets[item].length).fill(""));
+                    setCurrentQuestion(0);
+                    setShowFeedback(false);
+                  }}
                   className={`h-11 rounded-2xl border text-sm font-medium transition-all duration-200 ${
                     isActive
                       ? "border-emerald-500 bg-emerald-500 text-white shadow-[0_8px_20px_rgba(16,185,129,0.22)]"

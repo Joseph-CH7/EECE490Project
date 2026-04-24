@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
+import type { VisualMetrics } from "@/lib/interview-feedback";
 
-export default function InterviewCameraCoach() {
+type InterviewCameraCoachProps = {
+  trackingActive?: boolean;
+  onMetricsChange?: (metrics: VisualMetrics) => void;
+};
+
+export default function InterviewCameraCoach({
+  trackingActive = false,
+  onMetricsChange,
+}: InterviewCameraCoachProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [cameraEnabled, setCameraEnabled] = useState(false);
@@ -16,9 +25,59 @@ export default function InterviewCameraCoach() {
   const previousCenterRef = useRef<{ x: number; y: number } | null>(null);
   const movementHistoryRef = useRef<number[]>([]);
   const eyeSamplesRef = useRef<number[]>([]);
+  const sampleCountRef = useRef(0);
+  const detectedSamplesRef = useRef(0);
+  const centeredSamplesRef = useRef(0);
+  const lookingAwaySamplesRef = useRef(0);
+  const steadySamplesRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const modelLoadedRef = useRef(false);
+  const trackingActiveRef = useRef(trackingActive);
+  const onMetricsChangeRef = useRef(onMetricsChange);
+
+  useEffect(() => {
+    trackingActiveRef.current = trackingActive;
+  }, [trackingActive]);
+
+  useEffect(() => {
+    onMetricsChangeRef.current = onMetricsChange;
+  }, [onMetricsChange]);
+
+  const emitMetrics = useCallback(() => {
+    if (!onMetricsChangeRef.current) return;
+
+    const sampleCount = sampleCountRef.current;
+    const safeRatio = (value: number) => (sampleCount ? value / sampleCount : 0);
+    const averageEyeContactScore = eyeSamplesRef.current.length
+      ? eyeSamplesRef.current.reduce((sum, score) => sum + score, 0) / eyeSamplesRef.current.length
+      : 0;
+
+    onMetricsChangeRef.current({
+      sampleCount,
+      faceDetectedRatio: Number(safeRatio(detectedSamplesRef.current).toFixed(3)),
+      centeredFaceRatio: Number(safeRatio(centeredSamplesRef.current).toFixed(3)),
+      lookingAwayRatio: Number(safeRatio(lookingAwaySamplesRef.current).toFixed(3)),
+      steadyRatio: Number(safeRatio(steadySamplesRef.current).toFixed(3)),
+      averageEyeContactScore: Math.round(averageEyeContactScore),
+    });
+  }, []);
+
+  const resetMetrics = useCallback(() => {
+    sampleCountRef.current = 0;
+    detectedSamplesRef.current = 0;
+    centeredSamplesRef.current = 0;
+    lookingAwaySamplesRef.current = 0;
+    steadySamplesRef.current = 0;
+    eyeSamplesRef.current = [];
+    emitMetrics();
+  }, [emitMetrics]);
+
+  useEffect(() => {
+    if (!trackingActive) {
+      resetMetrics();
+    }
+  }, [resetMetrics, trackingActive]);
 
   useEffect(() => {
     async function startCameraAndTracking() {
@@ -50,16 +109,27 @@ export default function InterviewCameraCoach() {
             new faceapi.TinyFaceDetectorOptions()
           );
 
+          if (trackingActiveRef.current) {
+            sampleCountRef.current += 1;
+          }
+
           if (!detection) {
             setFaceText("Face: No face detected");
             setMovementText("Movement: Cannot measure");
             setEyeContactText("Eye contact: No face detected");
             previousCenterRef.current = null;
             movementHistoryRef.current = [];
+            if (trackingActiveRef.current) {
+              lookingAwaySamplesRef.current += 1;
+              emitMetrics();
+            }
             return;
           }
 
           setFaceText("Face: Detected");
+          if (trackingActiveRef.current) {
+            detectedSamplesRef.current += 1;
+          }
 
           const box = detection.box;
           const faceCenter = {
@@ -84,12 +154,21 @@ export default function InterviewCameraCoach() {
           if (combinedOffset < 0.12) {
             setEyeContactText("Eye contact: Good");
             currentEyeScore = 100;
+            if (trackingActiveRef.current) {
+              centeredSamplesRef.current += 1;
+            }
           } else if (combinedOffset < 0.22) {
             setEyeContactText("Eye contact: Fair");
             currentEyeScore = 65;
+            if (trackingActiveRef.current) {
+              centeredSamplesRef.current += 1;
+            }
           } else {
             setEyeContactText("Eye contact: Looking away");
             currentEyeScore = 30;
+            if (trackingActiveRef.current) {
+              lookingAwaySamplesRef.current += 1;
+            }
           }
 
           eyeSamplesRef.current.push(currentEyeScore);
@@ -119,14 +198,23 @@ export default function InterviewCameraCoach() {
 
             if (avgMovement < 3) {
               setMovementText("Movement: Very steady");
+              if (trackingActiveRef.current) {
+                steadySamplesRef.current += 1;
+              }
             } else if (avgMovement < 8) {
               setMovementText("Movement: Normal");
+              if (trackingActiveRef.current) {
+                steadySamplesRef.current += 1;
+              }
             } else {
               setMovementText("Movement: Too much movement");
             }
           }
 
           previousCenterRef.current = faceCenter;
+          if (trackingActiveRef.current) {
+            emitMetrics();
+          }
         }, 500);
       } catch (error) {
         console.error(error);
@@ -151,7 +239,7 @@ export default function InterviewCameraCoach() {
 
       previousCenterRef.current = null;
       movementHistoryRef.current = [];
-      eyeSamplesRef.current = [];
+      resetMetrics();
 
       setStatus("Camera off");
       setFaceText("Face: Waiting...");
@@ -169,7 +257,7 @@ export default function InterviewCameraCoach() {
     return () => {
       stopCameraAndTracking();
     };
-  }, [cameraEnabled]);
+  }, [cameraEnabled, emitMetrics, resetMetrics]);
 
   return (
     <div className="space-y-4">

@@ -50,7 +50,7 @@ export default function SetupPage() {
       localStorage.setItem("inferredCategory", data.inferredCategory || "");
 
       router.push("/interview");
-    } catch (error) {
+    } catch {
       alert("Something went wrong while generating questions.");
     } finally {
       setLoading(false);

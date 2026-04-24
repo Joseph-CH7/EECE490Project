@@ -11,12 +11,12 @@ from sklearn.metrics import classification_report, accuracy_score, f1_score
 from sklearn.utils import shuffle
 
 RESUMES_PATH = Path("data/processed/resumes_normalized.csv")
-PROFILES_PATH = Path("data/processed/resume_profiles_training_ready.csv")
+PROFILES_PATH = Path("data/processed/resume_profiles_balanced.csv")  # Using balanced dataset
 MODEL_DIR = Path("models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 FAST_MODE = True
 GRIDSEARCH_JOBS = 1
-PROFILE_CLASS_CAP = 250
+PROFILE_CLASS_CAP = 500  # Increased to use full balanced dataset
 
 REMOVE_CLASSES = {"professional_other", "business_commercial"}
 CATEGORY_MAP = {
