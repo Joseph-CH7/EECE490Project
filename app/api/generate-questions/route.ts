@@ -10,7 +10,7 @@ type GenerateQuestionsInput = {
 
 function runInterviewBundle(input: GenerateQuestionsInput) {
   return new Promise<string>((resolve, reject) => {
-    const child = spawn("py", ["scripts/generate_interview_bundle.py"], {
+    const child = spawn("python3", ["scripts/generate_interview_bundle.py"], {
       cwd: process.cwd(),
       stdio: ["pipe", "pipe", "pipe"],
     });

@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   ArrowRight,
@@ -12,8 +14,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-
+import {
+  SignInButton,
+  SignUpButton,
+  UserButton,
+  useUser,
+} from "@clerk/nextjs";
 export default function HomePage() {
+  const { isSignedIn, user } = useUser();
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#f7f9fc] text-slate-900">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(5,150,105,0.08),transparent_24%),radial-gradient(circle_at_top_right,rgba(15,23,42,0.045),transparent_22%)]" />
@@ -36,11 +44,36 @@ export default function HomePage() {
             </Link>
           </nav>
 
-          <Link href="/setup">
-            <Button className="rounded-full bg-emerald-600 px-5 text-white shadow-[0_10px_24px_rgba(5,150,105,0.22)] hover:bg-emerald-700">
-              Start Interview
-            </Button>
-          </Link>
+          <div className="flex items-center gap-3">
+  {isSignedIn ? (
+    <>
+      <UserButton />
+
+      <Link href="/dashboard">
+        <Button className="rounded-full bg-emerald-600 px-5 text-white shadow-[0_10px_24px_rgba(5,150,105,0.22)] hover:bg-emerald-700">
+          Dashboard
+        </Button>
+      </Link>
+    </>
+  ) : (
+    <>
+      <SignInButton mode="modal">
+        <Button
+          variant="outline"
+          className="rounded-full border-slate-200 bg-white"
+        >
+          Sign In
+        </Button>
+      </SignInButton>
+
+      <SignUpButton mode="modal">
+        <Button className="rounded-full bg-emerald-600 px-5 text-white shadow-[0_10px_24px_rgba(5,150,105,0.22)] hover:bg-emerald-700">
+          Get Started
+        </Button>
+      </SignUpButton>
+    </>
+  )}
+</div>
         </div>
       </header>
 
@@ -48,23 +81,25 @@ export default function HomePage() {
         <div className="grid items-center gap-12 lg:grid-cols-[1fr_1.05fr]">
           <div className="max-w-2xl">
             <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1 text-emerald-700 hover:bg-emerald-50">
-              AI-Powered Interview Coaching
+              {isSignedIn ? "Welcome back" : "AI-Powered Interview Coaching"}
             </Badge>
 
             <h1 className="mt-5 max-w-xl text-5xl font-black leading-[0.98] tracking-tight text-slate-950 sm:text-6xl">
-              Have your best mock interview session.
+              {isSignedIn
+                ? `Welcome back${user?.firstName ? `, ${user.firstName}` : ""}.`
+                : "Have your best mock interview session."}
             </h1>
 
             <p className="mt-6 max-w-xl text-lg leading-8 text-slate-600">
-              Practice realistic interviews tailored to your CV, target role,
-              and job description. Answer questions, receive feedback, and
-              improve like a real candidate preparing for a serious interview.
+              {isSignedIn
+                ? "Continue your interview practice, review your progress, or start a new mock interview session."
+                : "Practice realistic interviews tailored to your CV, target role, and job description. Answer questions, receive feedback, and improve like a real candidate preparing for a serious interview."}
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href="/setup">
                 <Button className="h-12 rounded-full bg-emerald-600 px-6 text-white shadow-[0_10px_24px_rgba(5,150,105,0.22)] hover:bg-emerald-700">
-                  Try it Free
+                  {isSignedIn ? "Start Interview" : "Try it Free"}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </Link>
