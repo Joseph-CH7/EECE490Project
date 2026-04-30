@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Mic,
+  Square,
   Sparkles,
   Briefcase,
   BarChart3,
@@ -19,21 +20,65 @@ import { Progress } from "@/components/ui/progress";
 
 type InterviewType = "Technical" | "Behavioral" | "Mixed";
 
+type SpeechRecognitionAlternative = {
+  transcript: string;
+};
+
+type SpeechRecognitionResult = {
+  isFinal: boolean;
+  0: SpeechRecognitionAlternative;
+};
+
+type SpeechRecognitionResultList = {
+  length: number;
+  [index: number]: SpeechRecognitionResult;
+};
+
+type SpeechRecognitionEvent = {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+};
+
+type SpeechRecognitionErrorEvent = {
+  error?: string;
+};
+
+type SpeechRecognitionInstance = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
+
 const questionSets: Record<InterviewType, string[]> = {
   Technical: [
-    "Explain a technical project where you solved a real engineering problem.",
-    "Why did you choose the framework or tools you used in that project?",
-    "What technical improvement would you make if you rebuilt it today?",
+    "Walk me through the architecture of a project you built, including the frontend, backend, database, and API flow.",
+    "How would you optimize a slow database query or API endpoint in a production application?",
+    "Explain a technical tradeoff you made between performance, maintainability, and development time.",
   ],
   Behavioral: [
-    "Tell me about a time you faced a challenge while working on a project.",
-    "Describe a situation where you had to work with others to solve a problem.",
-    "Tell me about a time you received feedback and how you responded.",
+    "Tell me about a time you had to handle a difficult project deadline or unexpected blocker.",
+    "Describe a situation where you disagreed with a teammate and how you resolved it.",
+    "Tell me about a time you received critical feedback and what you changed afterward.",
   ],
   Mixed: [
-    "Tell me about a project where you solved a real technical problem.",
-    "How did you handle a challenge or setback during that project?",
-    "What would you improve technically or personally if you did it again?",
+    "Describe a technical project you worked on and explain your personal contribution.",
+    "What was the hardest technical or teamwork challenge in that project, and how did you handle it?",
+    "If you rebuilt that project today, what would you improve in both the design and your process?",
   ],
 };
 
@@ -118,6 +163,11 @@ export default function PreviewPage() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+
+  const finalTranscriptRef = useRef("");
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const demoQuestions = useMemo(() => {
     return questionSets[interviewType];
@@ -129,6 +179,91 @@ export default function PreviewPage() {
     const updated = [...answers];
     updated[currentQuestion] = value;
     setAnswers(updated);
+  };
+
+  useEffect(() => {
+    const SpeechRecognitionClass =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognitionClass) {
+      setVoiceError("Voice mode is not supported in this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognitionClass();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setVoiceError("");
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      setIsListening(false);
+      setVoiceError(
+        event.error === "not-allowed"
+          ? "Microphone permission was blocked."
+          : "Voice mode stopped. Please try again.",
+      );
+    };
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interimTranscript = "";
+      let newFinalPart = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+
+        if (event.results[i].isFinal) {
+          newFinalPart += transcript + " ";
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      if (newFinalPart) {
+        finalTranscriptRef.current += newFinalPart;
+      }
+
+      handleAnswerChange(`${finalTranscriptRef.current}${interimTranscript}`.trim());
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      try {
+        recognition.stop();
+      } catch {
+        // Browser recognition may already be stopped.
+      }
+    };
+  }, [currentQuestion]);
+
+  const toggleVoiceMode = () => {
+    if (!recognitionRef.current) {
+      setVoiceError("Voice mode is not supported in this browser.");
+      return;
+    }
+
+    try {
+      if (isListening) {
+        recognitionRef.current.stop();
+        return;
+      }
+
+      finalTranscriptRef.current = answers[currentQuestion]
+        ? `${answers[currentQuestion]} `
+        : "";
+      recognitionRef.current.start();
+    } catch {
+      setVoiceError("Voice mode could not start. Please try again.");
+    }
   };
 
   const handleNext = () => {
@@ -445,6 +580,9 @@ export default function PreviewPage() {
                   placeholder={`Type your ${interviewType.toLowerCase()} answer here to experience this interview style...`}
                   className="min-h-[220px] rounded-[1.75rem] border-slate-200 bg-white p-5 text-base leading-7 shadow-sm focus-visible:ring-emerald-200"
                 />
+                {voiceError ? (
+                  <p className="text-sm text-rose-600">{voiceError}</p>
+                ) : null}
               </div>
 
               <div className="mt-6 flex flex-wrap gap-3">
@@ -457,9 +595,20 @@ export default function PreviewPage() {
                   Previous
                 </Button>
 
-                <Button className="h-12 rounded-2xl bg-emerald-600 px-5 text-white shadow-[0_8px_20px_rgba(5,150,105,0.22)] hover:bg-emerald-700">
-                  <Mic className="mr-2 h-4 w-4" />
-                  Demo Voice Mode
+                <Button
+                  onClick={toggleVoiceMode}
+                  className={`h-12 rounded-2xl px-5 text-white shadow-[0_8px_20px_rgba(5,150,105,0.22)] ${
+                    isListening
+                      ? "bg-rose-600 hover:bg-rose-700"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}
+                >
+                  {isListening ? (
+                    <Square className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Mic className="mr-2 h-4 w-4" />
+                  )}
+                  {isListening ? "Stop Voice" : "Demo Voice Mode"}
                 </Button>
 
                 <Button

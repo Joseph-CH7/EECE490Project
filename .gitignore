@@ -81,3 +81,6 @@ sales_confusion_review.csv
 sales_confusion_review_labeled.csv
 software_engineering_flagged_for_relabel.csv
 
+
+# clerk configuration (can include secrets)
+/.clerk/

@@ -88,6 +88,7 @@ export default function InterviewPage() {
   const [isListening, setIsListening] = useState(false);
   const [isInterviewerSpeaking, setIsInterviewerSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [interviewComplete, setInterviewComplete] = useState(false);
   const [visualMetrics, setVisualMetrics] = useState<VisualMetrics | null>(null);
 
   const finalTranscriptRef = useRef("");
@@ -232,6 +233,7 @@ export default function InterviewPage() {
     finalTranscriptRef.current = "";
     setAnswer("");
     setFollowUpPrompt(null);
+    setInterviewComplete(false);
 
     if (typeof window !== "undefined") {
       localStorage.removeItem("latestInterviewAnswer");
@@ -325,6 +327,7 @@ export default function InterviewPage() {
           ];
 
           setConversation(finalConversation);
+          setInterviewComplete(true);
           await speakText(closingReply);
         }
 
@@ -397,7 +400,7 @@ export default function InterviewPage() {
       console.error("Submit answer error:", error);
 
       const fallbackReply =
-        "I had trouble generating the next follow-up question. Please try again.";
+        "Thanks. I captured your answer, but I could not score this response right now. Please try submitting again or move to the next question.";
 
       setConversation([
         ...updatedConversation,
@@ -483,6 +486,8 @@ export default function InterviewPage() {
                       ? "Interviewer speaking"
                       : isListening
                       ? "Listening"
+                      : interviewComplete
+                      ? "Complete"
                       : isProcessing
                       ? "Thinking"
                       : "Ready"}
@@ -498,6 +503,7 @@ export default function InterviewPage() {
                   value={answer}
                   onChange={(e) => setAnswer(e.target.value)}
                   placeholder="Start speaking or type your answer here..."
+                  disabled={interviewComplete}
                   className="min-h-[260px] rounded-3xl border-slate-200 p-4 text-base"
                 />
               </div>
@@ -506,7 +512,7 @@ export default function InterviewPage() {
                 <Button
                   className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600"
                   onClick={startInterview}
-                  disabled={!questions.length}
+                  disabled={!questions.length || interviewComplete}
                 >
                   <Mic className="mr-2 h-4 w-4" />
                   Start Interview
@@ -515,7 +521,7 @@ export default function InterviewPage() {
                 <Button
                   className="rounded-2xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                   onClick={startListening}
-                  disabled={!interviewStarted || isInterviewerSpeaking || isProcessing}
+                  disabled={!interviewStarted || interviewComplete || isInterviewerSpeaking || isProcessing}
                 >
                   <Mic className="mr-2 h-4 w-4" />
                   Start Answer
@@ -534,6 +540,7 @@ export default function InterviewPage() {
                   variant="secondary"
                   className="rounded-2xl"
                   onClick={() => setAnswer("")}
+                  disabled={interviewComplete}
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
                   Clear
@@ -553,15 +560,22 @@ export default function InterviewPage() {
                   variant="secondary"
                   className="rounded-2xl"
                   onClick={submitAnswer}
-                  disabled={!answer.trim() || isProcessing}
+                  disabled={!answer.trim() || isProcessing || interviewComplete}
                 >
                   <Send className="mr-2 h-4 w-4" />
                   Submit Answer
                 </Button>
 
                 <Link href="/feedback">
-                  <Button variant="outline" className="rounded-2xl">
-                    Go to Feedback
+                  <Button
+                    variant={interviewComplete ? "default" : "outline"}
+                    className={
+                      interviewComplete
+                        ? "rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600"
+                        : "rounded-2xl"
+                    }
+                  >
+                    {interviewComplete ? "Review Feedback" : "Go to Feedback"}
                   </Button>
                 </Link>
               </div>

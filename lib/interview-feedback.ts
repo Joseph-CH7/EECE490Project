@@ -223,6 +223,140 @@ function getAnswerSignals(answer: string) {
   };
 }
 
+function isSystemDesignQuestion(question: string) {
+  const lowered = question.toLowerCase();
+  return containsAny(lowered, [
+    "design a",
+    "design an",
+    "design the",
+    "architect",
+    "architecture",
+    "system",
+    "scalable",
+    "distributed",
+    "payment",
+    "secure",
+    "security",
+    "infrastructure",
+  ]);
+}
+
+function isTechnicalQuestion(question: string, interviewType: string) {
+  const loweredType = interviewType.toLowerCase();
+  const loweredQuestion = question.toLowerCase();
+
+  return (
+    loweredType === "technical" ||
+    isSystemDesignQuestion(question) ||
+    loweredQuestion.startsWith("what is") ||
+    loweredQuestion.startsWith("define") ||
+    loweredQuestion.includes("difference between") ||
+    loweredQuestion.includes("compare") ||
+    containsAny(loweredQuestion, [
+      "implement",
+      "explain",
+      "optimize",
+      "database",
+      "api",
+      "algorithm",
+      "network",
+      "protocol",
+      "testing",
+      "debug",
+      "performance",
+      "java",
+      "javascript",
+      "react",
+      "python",
+      "sql",
+      "html",
+      "css",
+    ])
+  );
+}
+
+function isConceptQuestion(question: string) {
+  const lowered = question.toLowerCase();
+  return (
+    lowered.startsWith("what is") ||
+    lowered.startsWith("define") ||
+    lowered.startsWith("explain the concept") ||
+    lowered.startsWith("explain the use") ||
+    lowered.startsWith("explain how") ||
+    lowered.includes("difference between") ||
+    lowered.includes("compare") ||
+    lowered.includes(" keyword") ||
+    lowered.includes(" principle") ||
+    lowered.includes(" in javascript") ||
+    lowered.includes(" in java") ||
+    lowered.includes(" in python")
+  );
+}
+
+function hasConceptContrast(answer: string) {
+  const lowered = answer.toLowerCase();
+  return containsAny(lowered, [
+    "while",
+    "whereas",
+    "but",
+    "however",
+    "structured",
+    "relational",
+    "non-relational",
+    "nosql",
+    "sql",
+    "use case",
+    "used for",
+  ]);
+}
+
+function buildTechnicalFollowUp(answer: string, currentQuestion: string) {
+  const loweredQuestion = currentQuestion.toLowerCase();
+  const loweredAnswer = answer.toLowerCase();
+
+  if (isConceptQuestion(currentQuestion)) {
+    if (loweredQuestion.includes("java") && loweredQuestion.includes("javascript")) {
+      return "Good start. Can you give one practical example of where Java is commonly used and one example of where JavaScript is commonly used?";
+    }
+
+    if (loweredQuestion.includes("this") && loweredQuestion.includes("javascript")) {
+      return "Good start. Can you explain how the value of this changes depending on how a function is called in JavaScript?";
+    }
+
+    if (loweredQuestion.includes("sql") && loweredQuestion.includes("nosql")) {
+      return "Good. Can you give one use case where SQL is the better choice and one use case where NoSQL is the better choice?";
+    }
+
+    return "Good start. Can you add a concrete example that shows the concept in practice?";
+  }
+
+  if (containsAny(loweredQuestion, ["secure", "security", "payment", "authentication", "fraud"])) {
+    if (!containsAny(loweredAnswer, ["encrypt", "token", "auth", "fraud", "2fa", "mfa", "pci"])) {
+      return "Security is central to this design. How would you handle authentication, transaction encryption, and fraud prevention?";
+    }
+
+    return "Good. Now walk me through the payment flow step by step, from user authentication to transaction confirmation and failure handling.";
+  }
+
+  if (containsAny(loweredQuestion, ["scale", "scalable", "distributed", "millions"])) {
+    return "How would your design handle high traffic, retries, and partial failures without creating duplicate or inconsistent transactions?";
+  }
+
+  if (containsAny(loweredQuestion, ["database", "data", "storage"])) {
+    return "What data would you store, which database design would you choose, and how would you keep the data consistent?";
+  }
+
+  if (containsAny(loweredQuestion, ["api", "backend", "service"])) {
+    return "What are the main API endpoints or services in your design, and how would they communicate safely?";
+  }
+
+  if (containsAny(loweredQuestion, ["optimize", "performance", "latency"])) {
+    return "Where would the main bottleneck be, and what would you measure first before optimizing it?";
+  }
+
+  return "What is the most important technical tradeoff in your design, and why would you choose that approach over the main alternative?";
+}
+
 export function buildCoachingReply(
   answer: string,
   currentQuestion: string,
@@ -235,9 +369,35 @@ export function buildCoachingReply(
   const isBehavioral = interviewType.toLowerCase() === "behavioral";
   const loweredQuestion = currentQuestion.toLowerCase();
   const signals = getAnswerSignals(answer);
+  const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
+  const conceptQuestion = isConceptQuestion(currentQuestion);
 
   if (words < 12) {
-    return "Please expand your answer a bit more. Walk me through your thinking, the steps you took, and what happened in the end.";
+    if (conceptQuestion) {
+      return hasConceptContrast(answer)
+        ? buildTechnicalFollowUp(answer, currentQuestion)
+        : "No problem. Try explaining the concept in simple terms, then give one practical use case.";
+    }
+
+    return technicalQuestion
+      ? "Please expand your technical answer. Walk me through the main components, data flow, and the most important tradeoff."
+      : "Please expand your answer a bit more. Walk me through your thinking, the steps you took, and what happened in the end.";
+  }
+
+  if (technicalQuestion) {
+    if (conceptQuestion) {
+      return buildTechnicalFollowUp(answer, currentQuestion);
+    }
+
+    if (signals.hasTool && !signals.hasTradeoff) {
+      return `You mentioned ${signals.mentionedTool}. Why was that the right choice here, and what alternative would you compare it against?`;
+    }
+
+    if (!signals.hasReasoning && words < 45) {
+      return "Can you explain why you chose that design and what constraint mattered most: security, latency, reliability, cost, or usability?";
+    }
+
+    return buildTechnicalFollowUp(answer, currentQuestion);
   }
 
   if (!hasOutcome) {
@@ -307,30 +467,49 @@ export function buildInterviewFeedback(
   const sentenceCount = splitSentences(answer).length;
   const hasExample = mentionsExample(answer);
   const hasOutcome = mentionsOutcome(answer) || countDigits(answer) > 0;
+  const signals = getAnswerSignals(answer);
+  const conceptQuestion = isConceptQuestion(currentQuestion);
+  const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
 
   const relevance = clamp(
-    4 +
-      Math.min(words / 12, 2.3) +
-      (hasExample ? 1.2 : 0) +
-      (hasOutcome ? 1.3 : 0),
+    conceptQuestion
+      ? 3.2 +
+          Math.min(words / 10, 3) +
+          Math.min(sentenceCount, 3) * 0.5 +
+          (signals.hasReasoning ? 1 : 0)
+      : 4 +
+          Math.min(words / 12, 2.3) +
+          (hasExample ? 1.2 : 0) +
+          (hasOutcome ? 1.3 : 0),
     1,
     10,
   );
 
   const keyword = clamp(
-    4 +
-      (hasExample ? 2 : 0) +
-      (hasOutcome ? 2 : 0) +
-      Math.min(sentenceCount, 3) * 0.6,
+    conceptQuestion || technicalQuestion
+      ? 3.4 +
+          (signals.hasTool ? 1.8 : 0) +
+          (signals.hasReasoning ? 1.1 : 0) +
+          Math.min(sentenceCount, 3) * 0.6 +
+          Math.min(words / 18, 1.6)
+      : 4 +
+          (hasExample ? 2 : 0) +
+          (hasOutcome ? 2 : 0) +
+          Math.min(sentenceCount, 3) * 0.6,
     1,
     10,
   );
 
   const semantic = clamp(
-    4.5 +
-      Math.min(words / 18, 2) +
-      Math.min(sentenceCount, 3) * 0.7 +
-      (currentQuestion ? 0.6 : 0),
+    conceptQuestion || technicalQuestion
+      ? 3.5 +
+          Math.min(words / 14, 3) +
+          Math.min(sentenceCount, 3) * 0.7 +
+          (signals.hasReasoning ? 1.1 : 0)
+      : 4.5 +
+          Math.min(words / 18, 2) +
+          Math.min(sentenceCount, 3) * 0.7 +
+          (currentQuestion ? 0.6 : 0),
     1,
     10,
   );
@@ -357,15 +536,27 @@ export function buildInterviewFeedback(
     10,
   );
 
-  const totalScore = Math.round(
+  let totalScore = Math.round(
     ((relevance + keyword + semantic) / 3) * 7 +
       ((delivery + visualPresence) / 2) * 3,
   );
 
+  if (words < 8) {
+    totalScore = Math.min(totalScore, 35);
+  } else if (words < 15) {
+    totalScore = Math.min(totalScore, 50);
+  }
+
   const strengths: string[] = [];
   const improvements: string[] = [];
 
-  if (hasExample) {
+  if (conceptQuestion) {
+    if (words >= 25 && signals.hasReasoning) {
+      strengths.push("You explained the concept with enough detail to show understanding.");
+    } else {
+      improvements.push("Add a clearer definition and one practical example to show you understand the concept.");
+    }
+  } else if (hasExample) {
     strengths.push("You grounded your answer in a concrete example instead of staying too general.");
   } else {
     improvements.push("Anchor your answer in one specific situation and make your personal role clearer.");

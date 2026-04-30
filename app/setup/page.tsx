@@ -13,13 +13,61 @@ export default function SetupPage() {
   const router = useRouter();
 
   const [cvFileName, setCvFileName] = useState("");
+  const [extractedCvText, setExtractedCvText] = useState("");
+  const [detectedCategory, setDetectedCategory] = useState("");
+  const [extractedCharacterCount, setExtractedCharacterCount] = useState(0);
   const [cvText, setCvText] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [interviewType, setInterviewType] = useState("Mixed");
   const [loading, setLoading] = useState(false);
+  const [cvExtracting, setCvExtracting] = useState(false);
+  const [cvUploadError, setCvUploadError] = useState("");
+
+  const handleCvUpload = async (file: File | undefined) => {
+    setCvUploadError("");
+    setDetectedCategory("");
+    setExtractedCvText("");
+    setExtractedCharacterCount(0);
+
+    if (!file) {
+      setCvFileName("");
+      return;
+    }
+
+    setCvFileName(file.name);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      setCvExtracting(true);
+
+      const res = await fetch("/api/extract-cv", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setCvUploadError(data.error || "Failed to extract CV text.");
+        return;
+      }
+
+      setExtractedCvText(data.text || "");
+      setDetectedCategory(data.displayCategory || data.inferredCategory || "");
+      setExtractedCharacterCount(data.characterCount || 0);
+    } catch {
+      setCvUploadError("Something went wrong while extracting the CV text.");
+    } finally {
+      setCvExtracting(false);
+    }
+  };
 
   const handleGenerate = async () => {
-    if (!jobDescription.trim() && !cvText.trim()) {
+    const cvInput = cvText.trim() || extractedCvText.trim();
+
+    if (!jobDescription.trim() && !cvInput) {
       alert("Please paste a CV summary or a job description first.");
       return;
     }
@@ -32,7 +80,11 @@ export default function SetupPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ cvText, jobDescription, interviewType }),
+        body: JSON.stringify({
+          cvText: cvInput,
+          jobDescription,
+          interviewType,
+        }),
       });
 
       const data = await res.json();
@@ -42,7 +94,7 @@ export default function SetupPage() {
         return;
       }
 
-      localStorage.setItem("cvText", cvText);
+      localStorage.setItem("cvText", cvInput);
       localStorage.setItem("jobDescription", jobDescription);
       localStorage.setItem("interviewType", interviewType);
       localStorage.setItem("questions", JSON.stringify(data.questions || []));
@@ -98,15 +150,40 @@ export default function SetupPage() {
                   <Upload className="mb-3 h-8 w-8 text-slate-500" />
                   <span className="font-medium text-slate-700">Click to upload your CV as PDF</span>
                   <span className="mt-1 text-sm text-slate-500">
-                    {cvFileName || "No file selected yet"}
+                    {cvExtracting
+                      ? "Extracting CV text..."
+                      : cvFileName || "No file selected yet"}
                   </span>
                   <input
                     type="file"
                     accept=".pdf"
                     className="hidden"
-                    onChange={(e) => setCvFileName(e.target.files?.[0]?.name || "")}
+                    onChange={(e) => {
+                      handleCvUpload(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
                   />
                 </label>
+
+                {cvUploadError ? (
+                  <div className="rounded-3xl border border-rose-100 bg-rose-50 p-4">
+                    <p className="text-sm font-semibold text-rose-800">
+                      CV extraction failed
+                    </p>
+                    <p className="mt-1 text-sm text-rose-700">{cvUploadError}</p>
+                  </div>
+                ) : null}
+
+                {detectedCategory ? (
+                  <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4">
+                    <p className="text-sm font-semibold text-emerald-800">
+                      Detected category: {detectedCategory}
+                    </p>
+                    <p className="mt-1 text-sm text-emerald-700">
+                      CV text was extracted and will be used for question matching. You can still write your own short summary below.
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-3">
@@ -114,7 +191,7 @@ export default function SetupPage() {
                 <Textarea
                   value={cvText}
                   onChange={(e) => setCvText(e.target.value)}
-                  placeholder="Paste your CV text, skills, or a short resume summary here so the model can infer your category..."
+                  placeholder="Write a short CV summary, key skills, or project highlights here. If you uploaded a CV, this can stay short."
                   className="min-h-[180px] rounded-3xl border-slate-200 p-4 text-base"
                 />
               </div>
@@ -168,7 +245,9 @@ export default function SetupPage() {
 
                   <div className="mt-4 space-y-2 text-sm text-slate-600">
                     <p><span className="font-medium text-slate-800">CV:</span> {cvFileName || "Not uploaded"}</p>
-                    <p><span className="font-medium text-slate-800">CV Text:</span> {cvText ? "Added" : "Not added yet"}</p>
+                    <p><span className="font-medium text-slate-800">Detected Category:</span> {detectedCategory || "Not detected yet"}</p>
+                    <p><span className="font-medium text-slate-800">Extracted CV:</span> {extractedCharacterCount ? `${extractedCharacterCount} characters ready` : "Not extracted yet"}</p>
+                    <p><span className="font-medium text-slate-800">Manual Summary:</span> {cvText ? "Added" : "Not added yet"}</p>
                     <p><span className="font-medium text-slate-800">Interview Type:</span> {interviewType}</p>
                     <p><span className="font-medium text-slate-800">Job Description:</span> {jobDescription ? "Added" : "Not added yet"}</p>
                   </div>
@@ -176,10 +255,14 @@ export default function SetupPage() {
 
                 <Button
                   onClick={handleGenerate}
-                  disabled={loading}
+                  disabled={loading || cvExtracting}
                   className="h-12 w-full rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600"
                 >
-                  {loading ? "Generating..." : "Generate My Interview"}
+                  {cvExtracting
+                    ? "Extracting CV..."
+                    : loading
+                    ? "Generating..."
+                    : "Generate My Interview"}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </CardContent>

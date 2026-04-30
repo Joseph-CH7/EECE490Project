@@ -8,79 +8,25 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { InterviewSessionFeedback } from "@/lib/interview-feedback";
 
-const fallbackFeedback: InterviewSessionFeedback = {
-  totalScore: 82,
-  relevance: 8.5,
-  keyword: 7.5,
-  semantic: 8.2,
-  delivery: 7.8,
-  visualPresence: 7.4,
-  strengths: [
-    "You gave clear, concrete examples in several answers.",
-    "Your answers showed ownership and solid technical contribution.",
-    "Your overall structure was logical and easy to follow.",
-  ],
-  improvements: [
-    "Quantify results more consistently across answers.",
-    "Mention tradeoffs and decisions more explicitly.",
-    "Tie examples back to the target role more directly.",
-  ],
-  followUp:
-    "Across the interview, which answer would you improve first, and how would you make it more specific, measurable, or better structured?",
-  answerCount: 3,
-  averageAnswerLength: 58,
-  includesExampleRate: 0.67,
-  includesOutcomeRate: 0.67,
-  visualMetrics: null,
-  entries: [
-    {
-      question: "Tell me about a project where you solved a real technical problem.",
-      answer:
-        "I built a backend service using Python and FastAPI to handle interview generation and scoring, and I improved the API flow so the frontend could display the results clearly.",
-      feedback: {
-        totalScore: 82,
-        relevance: 8.5,
-        keyword: 7.5,
-        semantic: 8.2,
-        delivery: 7.8,
-        visualPresence: 7.4,
-        strengths: [
-          "You grounded your answer in a concrete example instead of staying too general.",
-          "You referenced the outcome or impact, which makes your answer more convincing.",
-        ],
-        improvements: [
-          "Add a bit more structure: situation, action, and result in separate clear steps.",
-        ],
-        followUp:
-          "You mentioned FastAPI. Why was that the right choice for this situation, and what would have been the main alternative?",
-        answerLength: 35,
-        includesExample: true,
-        includesOutcome: true,
-        visualMetrics: null,
-      },
-    },
-  ],
-};
-
 export default function FeedbackPage() {
-  const [feedback] = useState<InterviewSessionFeedback>(() => {
+  const [feedback] = useState<InterviewSessionFeedback | null>(() => {
     if (typeof window === "undefined") {
-      return fallbackFeedback;
+      return null;
     }
 
     const savedFeedback =
-      localStorage.getItem("interviewSessionFeedback") ||
-      localStorage.getItem("latestInterviewFeedback");
+      localStorage.getItem("interviewSessionFeedback");
 
     if (!savedFeedback) {
-      return fallbackFeedback;
+      return null;
     }
 
     try {
-      return JSON.parse(savedFeedback) as InterviewSessionFeedback;
+      const parsed = JSON.parse(savedFeedback) as InterviewSessionFeedback;
+      return parsed.entries?.length && parsed.answerCount > 0 ? parsed : null;
     } catch (error) {
       console.error("Could not parse saved session feedback:", error);
-      return fallbackFeedback;
+      return null;
     }
   });
 
@@ -103,6 +49,35 @@ export default function FeedbackPage() {
       </header>
 
       <section className="mx-auto max-w-7xl px-6 py-12">
+        {!feedback ? (
+          <Card className="mx-auto max-w-2xl rounded-[2rem] border-slate-200 shadow-sm">
+            <CardContent className="p-8 text-center">
+              <Badge className="rounded-full bg-amber-100 px-4 py-1 text-amber-800 hover:bg-amber-100">
+                No Feedback Yet
+              </Badge>
+              <h1 className="mt-5 text-3xl font-black tracking-tight text-slate-950">
+                Complete at least one scored answer first
+              </h1>
+              <p className="mt-3 text-base leading-7 text-slate-600">
+                The feedback summary is created only after you answer and submit interview questions.
+              </p>
+              <div className="mt-6 flex justify-center gap-3">
+                <Link href="/setup">
+                  <Button className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600">
+                    Start Interview
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
+                <Link href="/">
+                  <Button variant="outline" className="rounded-2xl">
+                    Return Home
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
         <div className="space-y-3">
           <Badge className="rounded-full bg-emerald-100 px-4 py-1 text-emerald-700 hover:bg-emerald-100">
             Overall Interview Feedback
@@ -280,10 +255,12 @@ export default function FeedbackPage() {
           </Link>
 
           <Button className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600">
-            Next Question
+            Start New Interview
             <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         </div>
+          </>
+        )}
       </section>
     </main>
   );

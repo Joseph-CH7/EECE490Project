@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -63,6 +64,32 @@ SOURCE_PRIORITY = {
     "full_interview_questions_dataset": 3,
 }
 
+STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has",
+    "have", "in", "into", "is", "it", "of", "on", "or", "our", "that", "the",
+    "their", "this", "to", "using", "with", "you", "your", "will", "work",
+    "role", "job", "candidate", "experience", "team", "skills", "ability",
+}
+
+IMPORTANT_TERMS = {
+    "api", "backend", "frontend", "react", "next", "javascript", "typescript",
+    "python", "java", "sql", "database", "postgres", "mongodb", "firebase",
+    "cloud", "aws", "docker", "kubernetes", "security", "secure",
+    "authentication", "authorization", "encryption", "payment", "mobile",
+    "distributed", "scalable", "performance", "latency", "testing", "debug",
+    "machine", "learning", "model", "data", "analytics", "finance", "sales",
+}
+
+HIGH_PRIORITY_TERMS = {
+    "payment", "mobile", "security", "secure", "authentication",
+    "authorization", "encryption", "fraud", "transaction", "transactions",
+}
+
+BAD_QUESTION_PATTERNS = (
+    "rest api over virtual memory",
+    "api over virtual memory",
+)
+
 
 def clean_text(value: object) -> str:
     if value is None or pd.isna(value):
@@ -83,6 +110,37 @@ def infer_question_type(text: str) -> str:
 def count_keyword_hits(text: str, keywords: set[str]) -> int:
     lowered = text.lower()
     return sum(keyword in lowered for keyword in keywords)
+
+
+def extract_focus_terms(*texts: str) -> set[str]:
+    combined = " ".join(texts).lower()
+    words = re.findall(r"[a-z][a-z0-9+#.]{2,}", combined)
+    terms = {
+        word.strip(".")
+        for word in words
+        if word not in STOPWORDS and (len(word) >= 4 or word in IMPORTANT_TERMS)
+    }
+
+    return terms | {term for term in IMPORTANT_TERMS if term in combined}
+
+
+def score_question_relevance(question_text: str, focus_terms: set[str]) -> int:
+    if not focus_terms:
+        return 0
+
+    lowered = question_text.lower()
+    score = 0
+
+    for term in focus_terms:
+        if term in lowered:
+            if term in HIGH_PRIORITY_TERMS:
+                score += 6
+            elif term in IMPORTANT_TERMS:
+                score += 3
+            else:
+                score += 1
+
+    return score
 
 
 def predict_difficulty(model, question_text: str, question_type: str, job_category: str) -> str:
@@ -133,11 +191,19 @@ def load_questions() -> pd.DataFrame:
         df["source_priority"] = 4
 
     df = df[df["question_text"] != ""].copy()
+    for pattern in BAD_QUESTION_PATTERNS:
+        df = df[~df["question_text"].str.lower().str.contains(pattern, na=False)].copy()
     df = df.drop_duplicates(subset=["question_text"])
     return df
 
 
-def select_questions(df: pd.DataFrame, job_category: str, interview_type: str, n: int = 4) -> pd.DataFrame:
+def select_questions(
+    df: pd.DataFrame,
+    job_category: str,
+    interview_type: str,
+    focus_terms: set[str],
+    n: int = 4,
+) -> pd.DataFrame:
     interview_type = clean_text(interview_type).lower()
     job_category = clean_text(job_category).lower()
 
@@ -149,12 +215,19 @@ def select_questions(df: pd.DataFrame, job_category: str, interview_type: str, n
         if pool_df.empty or take_n <= 0:
             return pool_df.head(0)
 
+        pool_df = pool_df.copy()
+        pool_df["relevance_score"] = pool_df["question_text"].map(
+            lambda text: score_question_relevance(text, focus_terms)
+        )
         ranked_pool = pool_df.sort_values(
-            by=["source_priority", "difficulty", "question_text"],
-            ascending=[True, True, True],
+            by=["relevance_score", "source_priority", "difficulty", "question_text"],
+            ascending=[False, True, True, True],
         ).reset_index(drop=True)
-        shortlist = ranked_pool.head(max(take_n * 8, take_n))
-        return shortlist.sample(n=min(take_n, len(shortlist)), random_state=42).reset_index(drop=True)
+        best_relevance = int(ranked_pool["relevance_score"].max())
+        if best_relevance > 0:
+            ranked_pool = ranked_pool[ranked_pool["relevance_score"] > 0].reset_index(drop=True)
+        shortlist = ranked_pool.head(max(take_n * 12, take_n))
+        return shortlist.sample(n=min(take_n, len(shortlist))).reset_index(drop=True)
 
     def refine_behavioral_pool(pool_df: pd.DataFrame) -> pd.DataFrame:
         if job_category == "human_resources":
@@ -196,7 +269,7 @@ def select_questions(df: pd.DataFrame, job_category: str, interview_type: str, n
 
     if len(pool) < n:
         remaining = filtered[~filtered["question_text"].isin(pool["question_text"])]
-        extra = remaining.sample(n=min(n - len(pool), len(remaining)), random_state=42)
+        extra = remaining.sample(n=min(n - len(pool), len(remaining)))
         pool = pd.concat([pool, extra], ignore_index=True)
 
     return rank_and_sample(pool, n)
@@ -219,7 +292,8 @@ def build_payload(raw: dict[str, object]) -> dict[str, object]:
     question_category = QUESTION_CATEGORY_MAP.get(inferred_category, "software_engineering")
 
     questions_df = load_questions()
-    selected = select_questions(questions_df, question_category, interview_type, n=4)
+    focus_terms = extract_focus_terms(cv_text, job_description)
+    selected = select_questions(questions_df, question_category, interview_type, focus_terms, n=4)
 
     difficulty_model = joblib.load(DIFFICULTY_MODEL_PATH) if DIFFICULTY_MODEL_PATH.exists() else None
 
@@ -240,6 +314,7 @@ def build_payload(raw: dict[str, object]) -> dict[str, object]:
                 "type": question_type,
                 "difficulty": difficulty,
                 "jobCategory": question_category,
+                "relevanceScore": int(row.get("relevance_score", 0) or 0),
             }
         )
 

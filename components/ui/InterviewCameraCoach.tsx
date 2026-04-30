@@ -25,6 +25,10 @@ export default function InterviewCameraCoach({
   const previousCenterRef = useRef<{ x: number; y: number } | null>(null);
   const movementHistoryRef = useRef<number[]>([]);
   const eyeSamplesRef = useRef<number[]>([]);
+  const recentEyeScoresRef = useRef<number[]>([]);
+  const awaySampleCountRef = useRef(0);
+  const noFaceSampleCountRef = useRef(0);
+  const highMovementSampleCountRef = useRef(0);
   const sampleCountRef = useRef(0);
   const detectedSamplesRef = useRef(0);
   const centeredSamplesRef = useRef(0);
@@ -70,6 +74,10 @@ export default function InterviewCameraCoach({
     lookingAwaySamplesRef.current = 0;
     steadySamplesRef.current = 0;
     eyeSamplesRef.current = [];
+    recentEyeScoresRef.current = [];
+    awaySampleCountRef.current = 0;
+    noFaceSampleCountRef.current = 0;
+    highMovementSampleCountRef.current = 0;
     emitMetrics();
   }, [emitMetrics]);
 
@@ -101,24 +109,41 @@ export default function InterviewCameraCoach({
         setStatus("Camera on");
 
         intervalRef.current = setInterval(async () => {
-          if (!videoRef.current) return;
-          if (videoRef.current.readyState < 2) return;
+          const video = videoRef.current;
+          if (!video) return;
+          if (video.readyState < 2) return;
 
           const detection = await faceapi.detectSingleFace(
-            videoRef.current,
+            video,
             new faceapi.TinyFaceDetectorOptions()
           );
+
+          if (videoRef.current !== video) return;
 
           if (trackingActiveRef.current) {
             sampleCountRef.current += 1;
           }
 
           if (!detection) {
-            setFaceText("Face: No face detected");
+            noFaceSampleCountRef.current += 1;
+            const sustainedNoFace = noFaceSampleCountRef.current >= 2;
+
+            setFaceText(
+              sustainedNoFace
+                ? "Face: Turned away or out of frame"
+                : "Face: No face detected",
+            );
             setMovementText("Movement: Cannot measure");
-            setEyeContactText("Eye contact: No face detected");
+            setEyeContactText(
+              sustainedNoFace
+                ? "Eye contact: Looking away"
+                : "Eye contact: No face detected",
+            );
             previousCenterRef.current = null;
             movementHistoryRef.current = [];
+            recentEyeScoresRef.current = [];
+            awaySampleCountRef.current = 0;
+            highMovementSampleCountRef.current = 0;
             if (trackingActiveRef.current) {
               lookingAwaySamplesRef.current += 1;
               emitMetrics();
@@ -127,6 +152,7 @@ export default function InterviewCameraCoach({
           }
 
           setFaceText("Face: Detected");
+          noFaceSampleCountRef.current = 0;
           if (trackingActiveRef.current) {
             detectedSamplesRef.current += 1;
           }
@@ -137,8 +163,10 @@ export default function InterviewCameraCoach({
             y: box.y + box.height / 2,
           };
 
-          const videoWidth = videoRef.current.videoWidth;
-          const videoHeight = videoRef.current.videoHeight;
+          const videoWidth = video.videoWidth;
+          const videoHeight = video.videoHeight;
+
+          if (!videoWidth || !videoHeight) return;
 
           const frameCenter = {
             x: videoWidth / 2,
@@ -147,28 +175,66 @@ export default function InterviewCameraCoach({
 
           const normalizedOffsetX = Math.abs(faceCenter.x - frameCenter.x) / frameCenter.x;
           const normalizedOffsetY = Math.abs(faceCenter.y - frameCenter.y) / frameCenter.y;
-          const combinedOffset = (normalizedOffsetX + normalizedOffsetY) / 2;
+          const faceBox = detection.box;
+          const leftMargin = Math.max(faceBox.x, 0);
+          const rightMargin = Math.max(videoWidth - (faceBox.x + faceBox.width), 0);
+          const marginDenominator = Math.max(leftMargin + rightMargin, 1);
+          const horizontalBias = Math.abs(leftMargin - rightMargin) / marginDenominator;
+
+          const combinedOffset =
+            normalizedOffsetX * 0.45 +
+            normalizedOffsetY * 0.15 +
+            horizontalBias * 0.4;
+          const rawLookingAway =
+            combinedOffset >= 0.3 ||
+            normalizedOffsetX >= 0.18 ||
+            horizontalBias >= 0.28;
+          const sustainedLookingAway = rawLookingAway
+            ? awaySampleCountRef.current + 1 >= 2
+            : false;
+
+          awaySampleCountRef.current = rawLookingAway
+            ? awaySampleCountRef.current + 1
+            : 0;
 
           let currentEyeScore = 0;
 
-          if (combinedOffset < 0.12) {
-            setEyeContactText("Eye contact: Good");
+          if (sustainedLookingAway) {
+            currentEyeScore = 20;
+            if (trackingActiveRef.current) {
+              lookingAwaySamplesRef.current += 1;
+            }
+          } else if (combinedOffset < 0.2) {
             currentEyeScore = 100;
             if (trackingActiveRef.current) {
               centeredSamplesRef.current += 1;
             }
-          } else if (combinedOffset < 0.22) {
-            setEyeContactText("Eye contact: Fair");
-            currentEyeScore = 65;
+          } else if (combinedOffset < 0.3) {
+            currentEyeScore = 75;
             if (trackingActiveRef.current) {
               centeredSamplesRef.current += 1;
             }
           } else {
+            currentEyeScore = 55;
+          }
+
+          recentEyeScoresRef.current.push(currentEyeScore);
+          if (recentEyeScoresRef.current.length > 6) {
+            recentEyeScoresRef.current.shift();
+          }
+
+          const recentEyeScore =
+            recentEyeScoresRef.current.reduce((a, b) => a + b, 0) /
+            recentEyeScoresRef.current.length;
+
+          if (sustainedLookingAway) {
             setEyeContactText("Eye contact: Looking away");
-            currentEyeScore = 30;
-            if (trackingActiveRef.current) {
-              lookingAwaySamplesRef.current += 1;
-            }
+          } else if (recentEyeScore >= 88) {
+            setEyeContactText("Eye contact: Good");
+          } else if (recentEyeScore >= 55) {
+            setEyeContactText("Eye contact: Fair");
+          } else {
+            setEyeContactText("Eye contact: Looking away");
           }
 
           eyeSamplesRef.current.push(currentEyeScore);
@@ -184,30 +250,44 @@ export default function InterviewCameraCoach({
           if (previousCenterRef.current) {
             const dx = faceCenter.x - previousCenterRef.current.x;
             const dy = faceCenter.y - previousCenterRef.current.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
+            const normalizedDist =
+              Math.sqrt(dx * dx + dy * dy) / Math.max(box.width, box.height, 1);
 
-            movementHistoryRef.current.push(dist);
+            movementHistoryRef.current.push(normalizedDist);
 
-            if (movementHistoryRef.current.length > 20) {
+            if (movementHistoryRef.current.length > 8) {
               movementHistoryRef.current.shift();
             }
 
+            const sortedMovement = [...movementHistoryRef.current].sort((a, b) => a - b);
+            const trimCount = Math.floor(sortedMovement.length * 0.15);
+            const trimmedMovement = sortedMovement.slice(
+              trimCount,
+              sortedMovement.length - trimCount || sortedMovement.length,
+            );
             const avgMovement =
-              movementHistoryRef.current.reduce((a, b) => a + b, 0) /
-              movementHistoryRef.current.length;
+              trimmedMovement.reduce((a, b) => a + b, 0) /
+              Math.max(trimmedMovement.length, 1);
 
-            if (avgMovement < 3) {
+            if (avgMovement < 0.025) {
+              highMovementSampleCountRef.current = 0;
               setMovementText("Movement: Very steady");
               if (trackingActiveRef.current) {
                 steadySamplesRef.current += 1;
               }
-            } else if (avgMovement < 8) {
+            } else if (avgMovement < 0.07) {
+              highMovementSampleCountRef.current = 0;
               setMovementText("Movement: Normal");
               if (trackingActiveRef.current) {
                 steadySamplesRef.current += 1;
               }
             } else {
-              setMovementText("Movement: Too much movement");
+              highMovementSampleCountRef.current += 1;
+              setMovementText(
+                highMovementSampleCountRef.current >= 2
+                  ? "Movement: Too much movement"
+                  : "Movement: Normal",
+              );
             }
           }
 
@@ -239,6 +319,10 @@ export default function InterviewCameraCoach({
 
       previousCenterRef.current = null;
       movementHistoryRef.current = [];
+      recentEyeScoresRef.current = [];
+      awaySampleCountRef.current = 0;
+      noFaceSampleCountRef.current = 0;
+      highMovementSampleCountRef.current = 0;
       resetMetrics();
 
       setStatus("Camera off");

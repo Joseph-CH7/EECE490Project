@@ -33,6 +33,9 @@ def normalized_series(series: pd.Series) -> pd.Series:
 
 
 def summarize_questions(path: Path) -> list[str]:
+    if not path.exists():
+        return [f"- Missing file: `{path.relative_to(ROOT)}`"]
+
     df = pd.read_csv(path).copy()
     df["question_text"] = df["question_text"].map(clean_text)
     df["question_type"] = df["question_type"].astype(str).str.lower().str.strip()
@@ -58,6 +61,9 @@ def summarize_questions(path: Path) -> list[str]:
 
 
 def summarize_resumes(path: Path, text_col: str, label_col: str) -> list[str]:
+    if not path.exists():
+        return [f"- Missing file: `{path.relative_to(ROOT)}`"]
+
     df = pd.read_csv(path).copy()
     df[text_col] = df[text_col].map(clean_text)
     df[label_col] = df[label_col].astype(str).str.lower().str.strip()
