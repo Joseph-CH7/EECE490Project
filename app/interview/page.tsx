@@ -76,6 +76,34 @@ declare global {
   }
 }
 
+function normalizeQuestionKey(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(can you|could you|please|explain|describe|tell me about|what is|what are|how would|how do)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dedupeQuestionList(values: string[]) {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const value of values) {
+    const text = value.trim();
+    const key = normalizeQuestionKey(text);
+
+    if (!text || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(text);
+  }
+
+  return deduped;
+}
+
 export default function InterviewPage() {
   const [questions, setQuestions] = useState<string[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -93,6 +121,8 @@ export default function InterviewPage() {
 
   const finalTranscriptRef = useRef("");
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const askedQuestionKeysRef = useRef<Set<string>>(new Set());
+  const isSubmittingRef = useRef(false);
 
   const persistSessionFeedback = (
     nextEntry: InterviewFeedbackEntry,
@@ -144,7 +174,7 @@ export default function InterviewPage() {
     const savedInterviewType = localStorage.getItem("interviewType");
     const savedCategory = localStorage.getItem("inferredCategory");
 
-    if (savedQuestions) setQuestions(JSON.parse(savedQuestions));
+    if (savedQuestions) setQuestions(dedupeQuestionList(JSON.parse(savedQuestions)));
     if (savedInterviewType) setInterviewType(savedInterviewType);
     if (savedCategory) setInferredCategory(savedCategory.replace(/_/g, " "));
   }, []);
@@ -245,6 +275,7 @@ export default function InterviewPage() {
     if (!questions.length) return;
 
     finalTranscriptRef.current = "";
+    askedQuestionKeysRef.current = new Set([normalizeQuestionKey(questions[0])]);
     setAnswer("");
     setFollowUpPrompt(null);
     setInterviewComplete(false);
@@ -300,9 +331,12 @@ export default function InterviewPage() {
   };
 
   const submitAnswer = async () => {
+    if (isSubmittingRef.current) return;
+
     const currentAnswer = answer.trim();
     if (!currentAnswer) return;
 
+    isSubmittingRef.current = true;
     const updatedConversation: Message[] = [
       ...conversation,
       { role: "candidate", text: currentAnswer },
@@ -317,11 +351,20 @@ export default function InterviewPage() {
         setAnswer("");
         setFollowUpPrompt(null);
 
-        if (currentQuestionIndex < questions.length - 1) {
-          const nextIndex = currentQuestionIndex + 1;
+        let nextIndex = currentQuestionIndex + 1;
+
+        while (
+          nextIndex < questions.length &&
+          askedQuestionKeysRef.current.has(normalizeQuestionKey(questions[nextIndex]))
+        ) {
+          nextIndex += 1;
+        }
+
+        if (nextIndex < questions.length) {
           const nextQuestion = questions[nextIndex];
           const transitionReply = `Thanks. Let's move to the next question. ${nextQuestion}`;
 
+          askedQuestionKeysRef.current.add(normalizeQuestionKey(nextQuestion));
           setCurrentQuestionIndex(nextIndex);
 
           const finalConversation: Message[] = [
@@ -422,6 +465,7 @@ export default function InterviewPage() {
       ]);
     } finally {
       setIsProcessing(false);
+      isSubmittingRef.current = false;
     }
   };
 

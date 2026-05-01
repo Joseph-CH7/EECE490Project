@@ -8,10 +8,76 @@ type GenerateQuestionsInput = {
   interviewType?: string;
 };
 
+type QuestionDetail = {
+  text?: string;
+  [key: string]: unknown;
+};
+
 const PYTHON_COMMANDS =
   process.platform === "win32"
     ? [["py"], ["python"], ["python3"]]
     : [["python3"], ["python"], ["py"]];
+
+function normalizeQuestionText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(can you|could you|please|explain|describe|tell me about|what is|what are|how would|how do)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getQuestionSignature(value: string) {
+  const normalized = normalizeQuestionText(value);
+  const words = normalized
+    .split(" ")
+    .filter((word) => word.length > 3)
+    .filter(
+      (word) =>
+        ![
+          "question",
+          "interview",
+          "candidate",
+          "experience",
+          "using",
+          "with",
+          "your",
+          "would",
+          "about",
+        ].includes(word),
+    );
+
+  return words.slice(0, 8).sort().join(" ");
+}
+
+function dedupeQuestions(questions: QuestionDetail[]) {
+  const seenText = new Set<string>();
+  const seenSignatures = new Set<string>();
+  const deduped: QuestionDetail[] = [];
+
+  for (const question of questions) {
+    const text = typeof question.text === "string" ? question.text.trim() : "";
+
+    if (!text) {
+      continue;
+    }
+
+    const normalized = normalizeQuestionText(text);
+    const signature = getQuestionSignature(text);
+
+    if (seenText.has(normalized) || (signature && seenSignatures.has(signature))) {
+      continue;
+    }
+
+    seenText.add(normalized);
+    if (signature) {
+      seenSignatures.add(signature);
+    }
+    deduped.push({ ...question, text });
+  }
+
+  return deduped;
+}
 
 function runInterviewBundle(input: GenerateQuestionsInput) {
   const runWithCommand = (commandIndex: number): Promise<string> => {
@@ -74,11 +140,14 @@ export async function POST(req: Request) {
     const input = (await req.json()) as GenerateQuestionsInput;
     const raw = await runInterviewBundle(input);
     const data = JSON.parse(raw);
-    const questionDetails = Array.isArray(data.questions) ? data.questions : [];
+    const questionDetails = dedupeQuestions(
+      Array.isArray(data.questions) ? data.questions : [],
+    );
 
     return Response.json({
       ...data,
       questions: questionDetails.map((question: { text?: string }) => question.text ?? ""),
+      questionCount: questionDetails.length,
       questionDetails,
     });
   } catch (error) {

@@ -99,13 +99,31 @@ function containsAny(text: string, phrases: string[]) {
   return phrases.some((phrase) => lowered.includes(phrase));
 }
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function countKeywordMentions(text: string, keyword: string) {
+  const escaped = escapeRegex(keyword);
+  const pattern = /[a-z0-9+#.]/i.test(keyword[0]) && /[a-z0-9+#.]/i.test(keyword[keyword.length - 1])
+    ? new RegExp(`(^|[^a-z0-9+#.])${escaped}($|[^a-z0-9+#.])`, "gi")
+    : new RegExp(escaped, "gi");
+
+  return (text.match(pattern) || []).length;
+}
+
 function extractMentionedTerm(text: string, phrases: string[]) {
   const lowered = text.toLowerCase();
 
   for (const phrase of phrases) {
-    const index = lowered.indexOf(phrase);
-    if (index !== -1) {
-      return text.slice(index, index + phrase.length);
+    const escaped = escapeRegex(phrase);
+    const match = lowered.match(
+      new RegExp(`(^|[^a-z0-9+#.])(${escaped})($|[^a-z0-9+#.])`, "i"),
+    );
+
+    if (match?.[2]) {
+      const index = lowered.indexOf(match[2]);
+      return text.slice(index, index + match[2].length);
     }
   }
 
@@ -223,6 +241,238 @@ function getAnswerSignals(answer: string) {
   };
 }
 
+export function extractCandidateKeywords(text: string) {
+  const lowered = text.toLowerCase();
+  const knownKeywords = [
+    "database normalization",
+    "normalization",
+    "denormalization",
+    "foreign key",
+    "primary key",
+    "referential integrity",
+    "entity relationship",
+    "indexing",
+    "transactions",
+    "acid",
+    "machine learning",
+    "deep learning",
+    "data pipeline",
+    "event-driven",
+    "integration test",
+    "unit test",
+    "javascript",
+    "typescript",
+    "kubernetes",
+    "microservices",
+    "microservice",
+    "authentication",
+    "authorization",
+    "serverless",
+    "scalability",
+    "performance",
+    "encryption",
+    "streaming",
+    "react",
+    "next.js",
+    "node",
+    "python",
+    "java",
+    "c++",
+    "c#",
+    "sql",
+    "postgres",
+    "mysql",
+    "mongodb",
+    "nosql",
+    "redis",
+    "docker",
+    "aws",
+    "azure",
+    "gcp",
+    "graphql",
+    "rest",
+    "api",
+    "cache",
+    "caching",
+    "oauth",
+    "jwt",
+    "secure",
+    "latency",
+    "security",
+    "testing",
+    "e2e",
+    "lambda",
+    "agile",
+    "scrum",
+    "stakeholder",
+    "stakeholders",
+    "leadership",
+    "collaboration",
+    "conflict",
+    "deadline",
+    "communication",
+    "prioritization",
+    "planning",
+    "debugging",
+  ];
+
+  const stopWords = new Set([
+    "about",
+    "after",
+    "also",
+    "because",
+    "before",
+    "being",
+    "built",
+    "could",
+    "during",
+    "every",
+    "first",
+    "from",
+    "have",
+    "into",
+    "just",
+    "like",
+    "more",
+    "most",
+    "much",
+    "need",
+    "only",
+    "other",
+    "over",
+    "problem",
+    "project",
+    "question",
+    "same",
+    "some",
+    "solution",
+    "that",
+    "their",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "through",
+    "used",
+    "using",
+    "very",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "with",
+    "work",
+    "worked",
+    "would",
+  ]);
+
+  const candidates = new Map<string, { count: number; firstIndex: number; known: boolean }>();
+
+  for (const keyword of knownKeywords) {
+    const count = countKeywordMentions(lowered, keyword);
+
+    if (count > 0) {
+      candidates.set(keyword, {
+        count,
+        firstIndex: lowered.indexOf(keyword),
+        known: true,
+      });
+    }
+  }
+
+  for (const match of lowered.matchAll(/\b[a-z][a-z0-9+#.]{3,}\b/g)) {
+    const term = match[0];
+
+    if (stopWords.has(term) || /^\d+$/.test(term)) {
+      continue;
+    }
+
+    const current = candidates.get(term);
+    candidates.set(term, {
+      count: (current?.count || 0) + 1,
+      firstIndex: current?.firstIndex ?? match.index ?? 0,
+      known: current?.known || false,
+    });
+  }
+
+  return [...candidates.entries()]
+    .sort((a, b) => {
+      const scoreA = a[1].count * 3 + (a[1].known ? 2 : 0);
+      const scoreB = b[1].count * 3 + (b[1].known ? 2 : 0);
+
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA;
+      }
+
+      return a[1].firstIndex - b[1].firstIndex;
+    })
+    .map(([keyword]) => keyword)
+    .slice(0, 6);
+}
+
+export function extractQuestionFocusConcept(question: string) {
+  const lowered = question.toLowerCase();
+  const knownConcepts = [
+    "database normalization",
+    "normalization",
+    "denormalization",
+    "foreign key",
+    "primary key",
+    "referential integrity",
+    "entity relationship",
+    "indexing",
+    "transactions",
+    "acid",
+    "sql",
+    "nosql",
+    "authentication",
+    "authorization",
+    "encryption",
+    "cache",
+    "caching",
+    "api",
+    "react",
+    "javascript",
+    "typescript",
+    "python",
+  ];
+
+  for (const concept of knownConcepts) {
+    if (countKeywordMentions(lowered, concept) > 0) {
+      return concept;
+    }
+  }
+
+  const match = lowered.match(
+    /^(?:what is|what are|define|explain(?: the concept of| the use of| how)?)\s+(.+?)(?:\s+in\s+|\s+for\s+|\s+within\s+|\?|$)/,
+  );
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const genericWords = new Set([
+    "concept",
+    "database",
+    "design",
+    "software",
+    "system",
+    "programming",
+    "development",
+  ]);
+  const conceptWords = match[1]
+    .replace(/[^a-z0-9+#.\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((word) => !genericWords.has(word));
+
+  return conceptWords.join(" ") || null;
+}
+
 function isSystemDesignQuestion(question: string) {
   const lowered = question.toLowerCase();
   return containsAny(lowered, [
@@ -310,11 +560,20 @@ function hasConceptContrast(answer: string) {
   ]);
 }
 
-function buildTechnicalFollowUp(answer: string, currentQuestion: string) {
+function buildTechnicalFollowUp(
+  answer: string,
+  currentQuestion: string,
+  answerKeywords: string[],
+) {
   const loweredQuestion = currentQuestion.toLowerCase();
   const loweredAnswer = answer.toLowerCase();
+  const questionConcept = extractQuestionFocusConcept(currentQuestion);
 
   if (isConceptQuestion(currentQuestion)) {
+    if (questionConcept?.includes("normalization")) {
+      return "You explained normalization. Can you give a small example of moving data from an unnormalized table into first or second normal form, and what redundancy that removes?";
+    }
+
     if (loweredQuestion.includes("java") && loweredQuestion.includes("javascript")) {
       return "Good start. Can you give one practical example of where Java is commonly used and one example of where JavaScript is commonly used?";
     }
@@ -327,6 +586,62 @@ function buildTechnicalFollowUp(answer: string, currentQuestion: string) {
       return "Good. Can you give one use case where SQL is the better choice and one use case where NoSQL is the better choice?";
     }
 
+    if (questionConcept) {
+      return `You explained ${questionConcept}. Can you give a practical example and one limitation or common mistake to watch for?`;
+    }
+  }
+
+  if (answerKeywords.length) {
+    const keyword = answerKeywords[0].toLowerCase();
+
+    if (keyword.includes("react") || keyword.includes("next")) {
+      return "You mentioned React. Why was it the right choice here, and how did it affect your component structure or state handling?";
+    }
+
+    if (keyword.includes("docker") || keyword.includes("kubernetes") || keyword.includes("container")) {
+      return "You mentioned containerization. Can you explain how you would deploy and manage this solution in production?";
+    }
+
+    if (keyword.includes("aws") || keyword.includes("azure") || keyword.includes("gcp")) {
+      return "You mentioned cloud infrastructure. Which cloud services would you use, and how would they support reliability and scalability?";
+    }
+
+    if (
+      keyword.includes("sql") ||
+      keyword.includes("mongodb") ||
+      keyword.includes("nosql") ||
+      keyword.includes("postgres") ||
+      keyword.includes("mysql")
+    ) {
+      return "You mentioned a database technology. How does that choice affect data modeling, consistency, and performance for this problem?";
+    }
+
+    if (keyword.includes("api") || keyword.includes("rest") || keyword.includes("graphql")) {
+      return "You mentioned API design. What are the main endpoints or contracts, and how would you secure and version them?";
+    }
+
+    if (
+      keyword.includes("auth") ||
+      keyword.includes("authentication") ||
+      keyword.includes("authorization") ||
+      keyword.includes("jwt") ||
+      keyword.includes("oauth")
+    ) {
+      return "You mentioned authentication. How would you handle secure access and protect user data in this design?";
+    }
+
+    if (keyword.includes("cache") || keyword.includes("redis") || keyword.includes("caching")) {
+      return "You mentioned caching. What would you cache, and how would you keep cached data fresh and correct?";
+    }
+
+    if (keyword.includes("latency") || keyword.includes("performance") || keyword.includes("optimize")) {
+      return "You mentioned performance. What metric would you use to measure it, and where would you focus optimization first?";
+    }
+
+    return `You mentioned ${answerKeywords[0]}. Can you explain the key decision you made around it and what tradeoff or limitation came with that choice?`;
+  }
+
+  if (isConceptQuestion(currentQuestion)) {
     return "Good start. Can you add a concrete example that shows the concept in practice?";
   }
 
@@ -357,6 +672,66 @@ function buildTechnicalFollowUp(answer: string, currentQuestion: string) {
   return "What is the most important technical tradeoff in your design, and why would you choose that approach over the main alternative?";
 }
 
+function buildKeywordAwareFollowUp(
+  keyword: string,
+  currentQuestion: string,
+  interviewType: string,
+) {
+  const loweredQuestion = currentQuestion.toLowerCase();
+  const loweredKeyword = keyword.toLowerCase();
+  const isBehavioral = interviewType.toLowerCase() === "behavioral";
+
+  if (containsAny(loweredKeyword, ["deadline", "prioritization", "planning"])) {
+    return `You mentioned ${keyword}. What did you prioritize first, and what tradeoff did that force you to make?`;
+  }
+
+  if (containsAny(loweredKeyword, ["leadership", "collaboration", "stakeholder", "stakeholders"])) {
+    return `You mentioned ${keyword}. What did you personally own, and how did you align the people involved when priorities differed?`;
+  }
+
+  if (containsAny(loweredKeyword, ["communication", "conflict"])) {
+    return `You mentioned ${keyword}. What was the hardest message to communicate, and how did you adjust your approach for the other person?`;
+  }
+
+  if (containsAny(loweredKeyword, ["testing", "debugging"])) {
+    return `You mentioned ${keyword}. What specific test or debugging step proved that your fix actually worked?`;
+  }
+
+  if (containsAny(loweredKeyword, ["security", "authentication", "authorization", "encryption", "jwt", "oauth"])) {
+    return `You mentioned ${keyword}. What threat or failure case were you protecting against, and how would you validate that the design is secure?`;
+  }
+
+  if (containsAny(loweredKeyword, ["performance", "latency", "scalability", "cache", "caching", "redis"])) {
+    return `You mentioned ${keyword}. What metric would show whether that choice worked, and what bottleneck would you investigate first?`;
+  }
+
+  if (containsAny(loweredKeyword, ["api", "rest", "graphql", "microservice", "microservices"])) {
+    return `You mentioned ${keyword}. What contract or endpoint mattered most, and how would you handle errors or version changes?`;
+  }
+
+  if (containsAny(loweredKeyword, ["sql", "postgres", "mysql", "mongodb", "nosql", "database"])) {
+    return `You mentioned ${keyword}. How did that affect your data model, and what consistency or performance tradeoff did you consider?`;
+  }
+
+  if (isConceptQuestion(currentQuestion)) {
+    return `You mentioned ${keyword}. Can you give a practical example that shows how it works and one limitation to watch for?`;
+  }
+
+  if (isSystemDesignQuestion(currentQuestion)) {
+    return `You mentioned ${keyword}. How would that shape your architecture, data flow, and failure handling?`;
+  }
+
+  if (isBehavioral || containsAny(loweredQuestion, ["time you", "describe", "tell me about"])) {
+    return `You mentioned ${keyword}. What did you personally do there, and how did that affect the outcome?`;
+  }
+
+  if (containsAny(loweredQuestion, ["why", "choose", "decision", "tradeoff", "trade-off"])) {
+    return `You mentioned ${keyword}. What made it the right choice compared with the main alternative?`;
+  }
+
+  return `You mentioned ${keyword}. What decision did that influence, and what evidence showed that your approach worked?`;
+}
+
 export function buildCoachingReply(
   answer: string,
   currentQuestion: string,
@@ -371,11 +746,12 @@ export function buildCoachingReply(
   const signals = getAnswerSignals(answer);
   const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
   const conceptQuestion = isConceptQuestion(currentQuestion);
+  const answerKeywords = extractCandidateKeywords(answer);
 
   if (words < 12) {
     if (conceptQuestion) {
       return hasConceptContrast(answer)
-        ? buildTechnicalFollowUp(answer, currentQuestion)
+        ? buildTechnicalFollowUp(answer, currentQuestion, answerKeywords)
         : "No problem. Try explaining the concept in simple terms, then give one practical use case.";
     }
 
@@ -386,7 +762,7 @@ export function buildCoachingReply(
 
   if (technicalQuestion) {
     if (conceptQuestion) {
-      return buildTechnicalFollowUp(answer, currentQuestion);
+      return buildTechnicalFollowUp(answer, currentQuestion, answerKeywords);
     }
 
     if (signals.hasTool && !signals.hasTradeoff) {
@@ -397,11 +773,7 @@ export function buildCoachingReply(
       return "Can you explain why you chose that design and what constraint mattered most: security, latency, reliability, cost, or usability?";
     }
 
-    return buildTechnicalFollowUp(answer, currentQuestion);
-  }
-
-  if (!hasOutcome) {
-    return "That gives me the context. What was the final outcome, and how did you measure whether your approach worked?";
+    return buildTechnicalFollowUp(answer, currentQuestion, answerKeywords);
   }
 
   if (sentences.length < 2) {
@@ -420,6 +792,14 @@ export function buildCoachingReply(
 
   if (signals.hasTool && !signals.hasTradeoff) {
     return `You mentioned ${signals.mentionedTool}. Why was that the right choice for this situation, and what would have been the main alternative?`;
+  }
+
+  if (answerKeywords.length) {
+    return buildKeywordAwareFollowUp(answerKeywords[0], currentQuestion, interviewType);
+  }
+
+  if (!hasOutcome) {
+    return "That gives me the context. What was the final outcome, and what evidence showed that your approach worked?";
   }
 
   if (signals.hasTeamwork && !signals.hasOwnership) {

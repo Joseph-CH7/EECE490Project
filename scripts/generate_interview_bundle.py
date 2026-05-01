@@ -100,6 +100,51 @@ def clean_text(value: object) -> str:
     return text
 
 
+def normalize_question_for_dedup(text: str) -> str:
+    lowered = text.lower()
+    lowered = re.sub(
+        r"\b(can you|could you|please|explain|describe|tell me about|what is|what are|how would|how do)\b",
+        " ",
+        lowered,
+    )
+    lowered = re.sub(r"[^a-z0-9\s]", " ", lowered)
+    return re.sub(r"\s+", " ", lowered).strip()
+
+
+def question_signature(text: str) -> str:
+    normalized = normalize_question_for_dedup(text)
+    words = [
+        word
+        for word in normalized.split()
+        if len(word) > 3 and word not in STOPWORDS
+    ]
+    return " ".join(sorted(words[:8]))
+
+
+def dedupe_similar_questions(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    deduped_rows = []
+    seen_normalized: set[str] = set()
+    seen_signatures: set[str] = set()
+
+    for row in df.to_dict(orient="records"):
+        question_text = clean_text(row.get("question_text"))
+        normalized = normalize_question_for_dedup(question_text)
+        signature = question_signature(question_text)
+
+        if normalized in seen_normalized or (signature and signature in seen_signatures):
+            continue
+
+        seen_normalized.add(normalized)
+        if signature:
+            seen_signatures.add(signature)
+        deduped_rows.append(row)
+
+    return pd.DataFrame(deduped_rows)
+
+
 def infer_question_type(text: str) -> str:
     lowered = text.lower()
     behavioral_score = sum(keyword in lowered for keyword in BEHAVIORAL_KEYWORDS)
@@ -272,6 +317,7 @@ def select_questions(
         extra = remaining.sample(n=min(n - len(pool), len(remaining)))
         pool = pd.concat([pool, extra], ignore_index=True)
 
+    pool = dedupe_similar_questions(pool)
     return rank_and_sample(pool, n)
 
 
