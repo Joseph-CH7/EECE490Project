@@ -25,9 +25,10 @@ export async function speak(text: string) {
   utterance.rate = 0.95;
   utterance.pitch = 1;
 
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve) => {
     utterance.onend = () => resolve();
-    utterance.onerror = () => reject(new Error("Speech synthesis failed"));
+    utterance.onerror = () => resolve();
+
     window.speechSynthesis.speak(utterance);
   });
 }

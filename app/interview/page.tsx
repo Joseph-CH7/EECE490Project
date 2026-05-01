@@ -118,9 +118,23 @@ export default function InterviewPage() {
     localStorage.setItem("interviewFeedbackEntries", JSON.stringify(nextEntries));
 
     if (sessionFeedback) {
-      localStorage.setItem("interviewSessionFeedback", JSON.stringify(sessionFeedback));
-      localStorage.setItem("latestInterviewFeedback", JSON.stringify(sessionFeedback));
-    }
+  localStorage.setItem("interviewSessionFeedback", JSON.stringify(sessionFeedback));
+
+  // ✅ SAVE FOR DASHBOARD
+  const interviews = JSON.parse(localStorage.getItem("interviews") || "[]");
+
+  interviews.push({
+    question: nextEntry.question,
+    answer: nextEntry.answer,
+    score: nextEntry.feedback.totalScore,
+    feedback: nextEntry.feedback,
+    date: new Date().toISOString(),
+  });
+
+  localStorage.setItem("interviews", JSON.stringify(interviews));
+
+  localStorage.setItem("latestInterviewFeedback", JSON.stringify(sessionFeedback));
+}
 
     return sessionFeedback;
   };
