@@ -91,9 +91,6 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id_here
 
 Important:
 
-- Do not upload `.env.local` to GitHub.
-- Keep API keys private.
-- Make sure `.env.local` is included in `.gitignore`.
 - Clerk keys are required for sign-in, sign-up, and user sessions.
 - Firebase keys are required for storing and retrieving saved results.
 - The Gemini API key is required for AI-assisted feedback and scoring.
