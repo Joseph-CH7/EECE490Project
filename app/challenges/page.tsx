@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useUser } from "@clerk/nextjs";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import {
   Home,
   ArrowLeft,
@@ -505,6 +508,7 @@ function evaluateAnswer(answer: string, challenge: any) {
 }
 
 export default function ChallengesPage() {
+  const { user } = useUser();
   const [selectedMajor, setSelectedMajor] = useState("All");
   const [selectedChallenge, setSelectedChallenge] = useState(challenges[0]);
   const [activeChallenge, setActiveChallenge] = useState<any>(null);
@@ -539,6 +543,25 @@ useEffect(() => {
 
   return () => clearInterval(timer);
 }, [activeChallenge, submitted, timeLeft]);
+async function saveChallengeResult(savedChallenge: any) {
+  // Keep localStorage so dashboard can still work locally
+  const oldChallenges = JSON.parse(localStorage.getItem("challenges") || "[]");
+
+  localStorage.setItem(
+    "challenges",
+    JSON.stringify([savedChallenge, ...oldChallenges])
+  );
+
+  // Also save to Firebase for real dashboard persistence
+  if (!user) return;
+
+  await addDoc(collection(db, "challengeResults"), {
+    ...savedChallenge,
+    userId: user.id,
+    userEmail: user.primaryEmailAddress?.emailAddress || "",
+    createdAt: serverTimestamp(),
+  });
+}
 
 // When time ends
   useEffect(() => {
@@ -619,6 +642,7 @@ useEffect(() => {
       };
 
       const savedChallenge = {
+        challengeId: activeChallenge.id,
         title: activeChallenge.title,
         major: activeChallenge.major,
         type: activeChallenge.type,
@@ -626,8 +650,6 @@ useEffect(() => {
         level: evaluationResult.level,
         feedback: evaluationResult.feedback,
         answer,
-        autoSubmitted,
-        timeExpired,
         sampleAnswer: activeChallenge.sampleAnswer,
         qualitySimilarity: evaluationResult.quality_similarity,
         relevanceSimilarity: evaluationResult.relevance_similarity,
@@ -637,14 +659,7 @@ useEffect(() => {
         date: new Date().toISOString(),
       };
 
-      const oldChallenges = JSON.parse(
-        localStorage.getItem("challenges") || "[]"
-      );
-
-      localStorage.setItem(
-        "challenges",
-        JSON.stringify([savedChallenge, ...oldChallenges])
-      );
+      await saveChallengeResult(savedChallenge);
 
       setEvaluation(evaluationResult);
       setSubmitted(true);
@@ -654,6 +669,7 @@ useEffect(() => {
       const fallbackResult = evaluateAnswer(answer, activeChallenge);
 
       const savedChallenge = {
+        challengeId: activeChallenge.id,
         title: activeChallenge.title,
         major: activeChallenge.major,
         type: activeChallenge.type,
@@ -665,18 +681,13 @@ useEffect(() => {
         missingPoints: fallbackResult.missingPoints || [],
         coveredPoints:
           fallbackResult.results?.filter((item: any) => item.matched) || [],
+        autoSubmitted: Boolean(autoSubmitted),
+        timeExpired: Boolean(timeExpired),
         usedML: false,
         date: new Date().toISOString(),
       };
 
-      const oldChallenges = JSON.parse(
-        localStorage.getItem("challenges") || "[]"
-      );
-
-      localStorage.setItem(
-        "challenges",
-        JSON.stringify([savedChallenge, ...oldChallenges])
-      );
+      await saveChallengeResult(savedChallenge);
 
       setEvaluation(fallbackResult);
       setSubmitted(true);

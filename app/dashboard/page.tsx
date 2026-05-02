@@ -22,8 +22,14 @@ type Interview = {
 type Challenge = {
   title?: string;
   major?: string;
+  type?: string;
   score: number;
+  level?: string;
+  feedback?: string;
   date?: string;
+  usedML?: boolean;
+  qualitySimilarity?: number;
+  relevanceSimilarity?: number;
 };
 
 export default function DashboardPage() {
@@ -31,32 +37,41 @@ export default function DashboardPage() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
 
   useEffect(() => {
-    setInterviews(JSON.parse(localStorage.getItem("interviews") || "[]"));
-    
+    const savedInterviews = JSON.parse(
+      localStorage.getItem("interviews") || "[]"
+    );
+
+    const savedChallenges = JSON.parse(
+      localStorage.getItem("challenges") || "[]"
+    );
+
+    setInterviews(savedInterviews);
+    setChallenges(savedChallenges);
   }, []);
-const savedChallenges =
-  typeof window !== "undefined"
-    ? JSON.parse(localStorage.getItem("challenges") || "[]")
-    : [];
+
   const bestInterviewScore = interviews.length
-    ? Math.max(...interviews.map((i) => i.score))
+    ? Math.max(...interviews.map((i) => Number(i.score)))
     : "—";
 
   const averageInterviewScore = interviews.length
     ? Math.round(
-        interviews.reduce((total, interview) => total + interview.score, 0) /
-          interviews.length
+        interviews.reduce(
+          (total, interview) => total + Number(interview.score),
+          0
+        ) / interviews.length
       )
     : "—";
 
   const bestChallengeScore = challenges.length
-    ? Math.max(...challenges.map((c) => c.score))
+    ? Math.max(...challenges.map((c) => Number(c.score)))
     : "—";
 
   const averageChallengeScore = challenges.length
     ? Math.round(
-        challenges.reduce((total, challenge) => total + challenge.score, 0) /
-          challenges.length
+        challenges.reduce(
+          (total, challenge) => total + Number(challenge.score),
+          0
+        ) / challenges.length
       )
     : "—";
 
@@ -251,78 +266,79 @@ const savedChallenges =
           {/* Recent Challenges */}
           <Card className="rounded-3xl border-slate-200 bg-white">
             <CardContent className="p-6">
-              
+              <h2 className="text-xl font-bold text-slate-950">
+                Completed Challenges
+              </h2>
 
               {challenges.length === 0 ? (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-  <h2 className="text-2xl font-black mb-4">Completed Challenges</h2>
-
-  {savedChallenges.length === 0 ? (
-    <p className="text-slate-600">No completed challenges yet.</p>
-  ) : (
-    <div className="space-y-4">
-      {savedChallenges.map((challenge: any, index: number) => (
-        <div
-          key={index}
-          className="border border-slate-200 rounded-xl p-4 bg-slate-50"
-        >
-          <div className="flex justify-between gap-4">
-            <div>
-              <h3 className="font-bold text-lg">{challenge.title}</h3>
-              <p className="text-sm text-slate-600">
-                {challenge.major} · {challenge.type}
-              </p>
-            </div>
-
-            <div className="text-right">
-              <p className="font-black text-xl">{challenge.score}/100</p>
-              <p className="text-sm text-slate-600">{challenge.level}</p>
-            </div>
-          </div>
-
-          {challenge.usedML && (
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-              <div className="bg-white rounded-lg p-3 border border-slate-200">
-                <p className="text-slate-500">Semantic Quality</p>
-                <p className="font-bold">{challenge.qualitySimilarity}</p>
-              </div>
-
-              <div className="bg-white rounded-lg p-3 border border-slate-200">
-                <p className="text-slate-500">Question Relevance</p>
-                <p className="font-bold">{challenge.relevanceSimilarity}</p>
-              </div>
-            </div>
-          )}
-
-          <p className="text-sm text-slate-700 mt-3">
-            <strong>Feedback:</strong> {challenge.feedback}
-          </p>
-        </div>
-      ))}
-    </div>
-  )}
-</div>
+                <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                  <p className="font-medium text-slate-700">
+                    No completed challenges yet.
+                  </p>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Complete your first challenge and your results will appear
+                    here.
+                  </p>
+                </div>
               ) : (
-                <div className="mt-6 space-y-3">
+                <div className="mt-6 space-y-4">
                   {challenges.map((challenge, index) => (
-                    <Link
-  href={`/challenges/${index}`}
-  key={index}
-  className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4 hover:bg-slate-100"
->
-  <div>
-    <p className="font-medium text-slate-700">
-      {challenge.title || `Challenge ${index + 1}`}
-    </p>
-    <p className="text-sm text-slate-500">
-      {challenge.major || "Practice Challenge"}
-    </p>
-  </div>
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="flex justify-between gap-4">
+                        <div>
+                          <h3 className="font-bold text-slate-800">
+                            {challenge.title || `Challenge ${index + 1}`}
+                          </h3>
+                          <p className="text-sm text-slate-500">
+                            {challenge.major || "Practice Challenge"}
+                            {challenge.type ? ` · ${challenge.type}` : ""}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-400">
+                            {challenge.date || "Completed challenge"}
+                          </p>
+                        </div>
 
-  <span className="font-bold text-blue-700">
-    {challenge.score}/100
-  </span>
-</Link>
+                        <div className="text-right">
+                          <p className="text-xl font-black text-blue-700">
+                            {challenge.score}/100
+                          </p>
+                          <p className="text-sm text-slate-600">
+                            {challenge.level || "Completed"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {challenge.usedML && (
+                        <div className="mt-4 grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+                          <div className="rounded-xl border border-slate-200 bg-white p-3">
+                            <p className="text-slate-500">
+                              Semantic Quality
+                            </p>
+                            <p className="font-bold">
+                              {challenge.qualitySimilarity ?? "—"}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-white p-3">
+                            <p className="text-slate-500">
+                              Question Relevance
+                            </p>
+                            <p className="font-bold">
+                              {challenge.relevanceSimilarity ?? "—"}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {challenge.feedback && (
+                        <p className="mt-3 text-sm text-slate-700">
+                          <strong>Feedback:</strong> {challenge.feedback}
+                        </p>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

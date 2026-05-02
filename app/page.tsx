@@ -46,17 +46,22 @@ export default function HomePage() {
             </Link>
 
             <Link
-              href="/dashboard"
-              className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+              href="/setup"
+              className="rounded-full px-5 py-2 text-sm font-medium text-slate-600 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
             >
-              Dashboard
+              Start Interview
             </Link>
-
             <Link
               href="/challenges"
               className="rounded-full px-5 py-2 text-sm font-medium text-slate-600 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
             >
               Challenges
+            </Link>
+            <Link
+              href="/dashboard"
+              className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+            >
+              Dashboard
             </Link>
             
           </nav>
