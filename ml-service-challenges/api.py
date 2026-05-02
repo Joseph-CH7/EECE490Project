@@ -14,7 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-models = joblib.load("ml/model.pkl")
+models = joblib.load("ml-service-challenges/model.pkl")
 
 embedding_model = models["embedding_model"]
 score_model = models["score_model"]

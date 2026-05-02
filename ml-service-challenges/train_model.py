@@ -8,8 +8,8 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.metrics import mean_absolute_error, r2_score, accuracy_score, classification_report
 
 
-DATA_PATH = "ml/dataset/challenge_answers.csv"
-MODEL_PATH = "ml/model.pkl"
+DATA_PATH = "ml-service-challenges/dataset/challenge_answers.csv"
+MODEL_PATH = "ml-service-challenges/model.pkl"
 
 
 def combine_text(row):

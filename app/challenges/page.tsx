@@ -18,7 +18,11 @@ import {
   RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
-
+const removeUndefined = (obj: Record<string, any>) => {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, value]) => value !== undefined)
+  );
+};
 const challenges = [
   {
     id: 1,
@@ -555,12 +559,31 @@ async function saveChallengeResult(savedChallenge: any) {
   // Also save to Firebase for real dashboard persistence
   if (!user) return;
 
-  await addDoc(collection(db, "challengeResults"), {
+  try {
+  const resultToSave = removeUndefined({
     ...savedChallenge,
-    userId: user.id,
-    userEmail: user.primaryEmailAddress?.emailAddress || "",
+
+    qualitySimilarity: savedChallenge?.qualitySimilarity ?? 0,
+    relevanceSimilarity: savedChallenge?.relevanceSimilarity ?? 0,
+    keywordScore: savedChallenge?.keywordScore ?? 0,
+    structureScore: savedChallenge?.structureScore ?? 0,
+    semanticScore: savedChallenge?.semanticScore ?? 0,
+    score: savedChallenge?.score ?? 0,
+    feedback: savedChallenge?.feedback ?? "No feedback generated.",
+
+    userId: user?.id ?? "guest",
+    userEmail: user?.primaryEmailAddress?.emailAddress ?? "",
     createdAt: serverTimestamp(),
   });
+
+  console.log("Saving challenge result:", resultToSave);
+
+  await addDoc(collection(db, "challengeResults"), resultToSave);
+} catch (error) {
+  console.error("Error saving challenge result:", error);
+} finally {
+  setIsEvaluating(false);
+}
 }
 
 // When time ends
@@ -661,10 +684,10 @@ async function saveChallengeResult(savedChallenge: any) {
         date: new Date().toISOString(),
       };
 
-      await saveChallengeResult(savedChallenge);
-
       setEvaluation(evaluationResult);
       setSubmitted(true);
+
+      saveChallengeResult(savedChallenge);
     } catch (error) {
       console.error("ML service unavailable. Using fallback evaluator:", error);
 
@@ -691,10 +714,10 @@ async function saveChallengeResult(savedChallenge: any) {
         date: new Date().toISOString(),
       };
 
-      await saveChallengeResult(savedChallenge);
-
       setEvaluation(fallbackResult);
-      setSubmitted(true);
+setSubmitted(true);
+
+saveChallengeResult(savedChallenge);
     } finally {
       setIsEvaluating(false);
     }
