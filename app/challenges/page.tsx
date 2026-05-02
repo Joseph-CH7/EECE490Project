@@ -653,6 +653,8 @@ async function saveChallengeResult(savedChallenge: any) {
         sampleAnswer: activeChallenge.sampleAnswer,
         qualitySimilarity: evaluationResult.quality_similarity,
         relevanceSimilarity: evaluationResult.relevance_similarity,
+        testedSkills: activeChallenge.testedSkills,
+        difficulty: activeChallenge.difficulty,
         autoSubmitted: Boolean(autoSubmitted),
         timeExpired: Boolean(timeExpired),
         usedML: true,
@@ -681,6 +683,8 @@ async function saveChallengeResult(savedChallenge: any) {
         missingPoints: fallbackResult.missingPoints || [],
         coveredPoints:
           fallbackResult.results?.filter((item: any) => item.matched) || [],
+        testedSkills: activeChallenge.testedSkills,
+        difficulty: activeChallenge.difficulty,
         autoSubmitted: Boolean(autoSubmitted),
         timeExpired: Boolean(timeExpired),
         usedML: false,
