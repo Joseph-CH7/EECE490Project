@@ -26,54 +26,60 @@ export default function HomePage() {
     <main className="relative min-h-screen overflow-hidden bg-[#f7f9fc] text-slate-900">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(5,150,105,0.08),transparent_24%),radial-gradient(circle_at_top_right,rgba(15,23,42,0.045),transparent_22%)]" />
 
-      <header className="relative z-10 border-b border-slate-200/80 bg-white/75 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div>
-            <p className="text-xl font-black tracking-tight text-slate-950">
-              InterviewPro
-            </p>
-            <p className="text-sm text-slate-500">Mock interview platform</p>
-          </div>
+          <Link href="/" className="group">
+            <div>
+              <p className="text-2xl font-black tracking-tight text-slate-950">
+                InterviewPro
+              </p>
+              <p className="text-sm text-slate-500">Mock interview platform</p>
+            </div>
+          </Link>
 
-          <nav className="hidden items-center gap-8 md:flex">
+          <nav className="hidden items-center gap-2 rounded-full border border-slate-200 bg-slate-50 p-1 md:flex">
             <Link
               href="/preview"
-              className="text-sm font-medium text-slate-600 transition hover:text-slate-900"
+              className="rounded-full px-5 py-2 text-sm font-medium text-slate-600 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
             >
               Preview
             </Link>
+
+            <Link
+              href="/dashboard"
+              className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+            >
+              Dashboard
+            </Link>
+
+            <Link
+              href="/challenges"
+              className="rounded-full px-5 py-2 text-sm font-medium text-slate-600 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
+            >
+              Challenges
+            </Link>
+            
           </nav>
 
           <div className="flex items-center gap-3">
-  {isSignedIn ? (
-    <>
-      <UserButton />
+            {isSignedIn ? (
+              <UserButton />
+            ) : (
+              <>
+                <SignInButton mode="modal">
+                  <Button variant="outline" className="rounded-full bg-white">
+                    Sign In
+                  </Button>
+                </SignInButton>
 
-      <Link href="/dashboard">
-        <Button className="rounded-full bg-emerald-600 px-5 text-white shadow-[0_10px_24px_rgba(5,150,105,0.22)] hover:bg-emerald-700">
-          Dashboard
-        </Button>
-      </Link>
-    </>
-  ) : (
-    <>
-      <SignInButton mode="modal">
-        <Button
-          variant="outline"
-          className="rounded-full border-slate-200 bg-white"
-        >
-          Sign In
-        </Button>
-      </SignInButton>
-
-      <SignUpButton mode="modal">
-        <Button className="rounded-full bg-emerald-600 px-5 text-white shadow-[0_10px_24px_rgba(5,150,105,0.22)] hover:bg-emerald-700">
-          Get Started
-        </Button>
-      </SignUpButton>
-    </>
-  )}
-</div>
+                <SignUpButton mode="modal">
+                  <Button className="rounded-full bg-emerald-600 text-white hover:bg-emerald-700">
+                    Get Started
+                  </Button>
+                </SignUpButton>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
