@@ -4,6 +4,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   buildCoachingReply,
   buildInterviewFeedback,
+  assessLowQualityAnswer,
+  answersFocusedFollowUp,
   extractCandidateKeywords,
   extractNewAnswerKeywords,
   extractQuestionFocusConcept,
@@ -458,6 +460,8 @@ Scoring guidance:
       ((delivery + visualScore) / 2) * 1.5,
   );
   const answerWords = wordCount(answer);
+  const lowQuality = assessLowQualityAnswer(answer);
+  const focusedFollowUpAnswered = answersFocusedFollowUp(answer, currentQuestion);
   let totalScore = Math.max(
     modelTotalScore,
     baselineFeedback.totalScore,
@@ -465,8 +469,17 @@ Scoring guidance:
 
   if (answerWords < 8) {
     totalScore = Math.min(totalScore, 35);
-  } else if (answerWords < 15) {
+  } else if (answerWords < 15 && !focusedFollowUpAnswered) {
     totalScore = Math.min(totalScore, 50);
+  }
+
+  if (lowQuality.isLowQuality) {
+    totalScore = Math.min(totalScore, lowQuality.cap);
+  }
+
+  if (!lowQuality.isLowQuality && focusedFollowUpAnswered) {
+    totalScore = Math.max(totalScore, answerWords >= 12 ? 68 : 60);
+    totalScore = Math.min(totalScore, 78);
   }
 
   const localFollowUp = buildCoachingReply(answer, currentQuestion, interviewType);
@@ -498,12 +511,19 @@ Scoring guidance:
   const feedback: LiveInterviewFeedback = {
     ...baselineFeedback,
     totalScore,
-    relevance,
-    keyword,
-    semantic,
-    delivery,
-    strengths: listFromModel(parsed.strengths, baselineFeedback.strengths),
-    improvements: listFromModel(parsed.improvements, baselineFeedback.improvements),
+    relevance: lowQuality.isLowQuality ? Math.min(relevance, 3.5) : relevance,
+    keyword: lowQuality.isLowQuality ? Math.min(keyword, 3) : keyword,
+    semantic: lowQuality.isLowQuality ? Math.min(semantic, 3) : semantic,
+    delivery: lowQuality.isLowQuality ? Math.min(delivery, 5) : delivery,
+    strengths: lowQuality.isLowQuality
+      ? []
+      : listFromModel(parsed.strengths, baselineFeedback.strengths),
+    improvements: lowQuality.isLowQuality
+      ? [
+          "Avoid repeated filler text; answer the question with specific concepts, examples, and reasoning.",
+          ...baselineFeedback.improvements,
+        ].slice(0, 4)
+      : listFromModel(parsed.improvements, baselineFeedback.improvements),
     followUp: guardedFollowUp,
   };
 

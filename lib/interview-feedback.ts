@@ -67,6 +67,62 @@ function wordCount(text: string) {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
+function normalizedAnswerWords(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+export function assessLowQualityAnswer(answer: string) {
+  const words = normalizedAnswerWords(answer);
+  const totalWords = words.length;
+  const uniqueWords = new Set(words);
+  const uniqueRatio = totalWords ? uniqueWords.size / totalWords : 0;
+  const lowered = answer.toLowerCase();
+  const repeatedShortPhrase = /\b(\w+\s+\w+(?:\s+\w+){0,4})\b(?:\s+\1\b){2,}/i.test(
+    lowered,
+  );
+  const mostlySameWord =
+    totalWords >= 12 &&
+    Math.max(
+      ...Array.from(uniqueWords).map(
+        (word) => words.filter((item) => item === word).length,
+      ),
+    ) /
+      totalWords >=
+      0.35;
+  const explicitTestText = containsAny(lowered, [
+    "this is a test",
+    "just a test",
+    "testing testing",
+    "ignore this",
+    "random words",
+    "blah blah",
+  ]);
+
+  const isLowQuality =
+    explicitTestText ||
+    repeatedShortPhrase ||
+    (totalWords >= 18 && uniqueRatio < 0.28) ||
+    mostlySameWord;
+
+  return {
+    isLowQuality,
+    reason: explicitTestText
+      ? "test/filler text"
+      : repeatedShortPhrase
+        ? "repeated phrase"
+        : uniqueRatio < 0.28
+          ? "very low word variety"
+          : mostlySameWord
+            ? "excessive repetition"
+            : "",
+    cap: totalWords < 8 ? 25 : 35,
+  };
+}
+
 function countDigits(text: string) {
   return (text.match(/\d/g) || []).length;
 }
@@ -585,7 +641,10 @@ function isConceptQuestion(question: string) {
   const lowered = question.toLowerCase();
   return (
     lowered.startsWith("what is") ||
+    lowered.startsWith("what are") ||
+    lowered.startsWith("what does") ||
     lowered.startsWith("define") ||
+    lowered.startsWith("describe the concept") ||
     lowered.startsWith("explain the concept") ||
     lowered.startsWith("explain the use") ||
     lowered.startsWith("explain how") ||
@@ -597,6 +656,43 @@ function isConceptQuestion(question: string) {
     lowered.includes(" in java") ||
     lowered.includes(" in python")
   );
+}
+
+export function isFocusedFollowUpQuestion(question: string) {
+  const lowered = question.toLowerCase();
+  return containsAny(lowered, [
+    "one limitation",
+    "one common mistake",
+    "common mistake",
+    "one practical example",
+    "one use case",
+    "small example",
+    "specific case",
+    "how would you avoid",
+  ]);
+}
+
+export function answersFocusedFollowUp(answer: string, question: string) {
+  if (!isFocusedFollowUpQuestion(question)) return false;
+
+  const lowered = answer.toLowerCase();
+
+  return containsAny(lowered, [
+    "mistake",
+    "limitation",
+    "example",
+    "use case",
+    "avoid",
+    "instead",
+    "better",
+    "wrong",
+    "problem",
+    "issue",
+    "action-based",
+    "resource-based",
+    "parameterized",
+    "prepared statement",
+  ]);
 }
 
 function isSqlNoSqlQuestion(question: string) {
@@ -937,8 +1033,10 @@ export function buildInterviewFeedback(
   const hasExample = mentionsExample(answer);
   const hasOutcome = mentionsOutcome(answer) || countDigits(answer) > 0;
   const signals = getAnswerSignals(answer);
+  const lowQuality = assessLowQualityAnswer(answer);
   const conceptQuestion = isConceptQuestion(currentQuestion);
   const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
+  const focusedFollowUpAnswered = answersFocusedFollowUp(answer, currentQuestion);
   const hasVisualMetrics = Boolean(visualMetrics && visualMetrics.sampleCount > 0);
 
   const relevance = clamp(
@@ -1013,32 +1111,51 @@ export function buildInterviewFeedback(
 
   if (words < 8) {
     totalScore = Math.min(totalScore, 35);
-  } else if (words < 15) {
+  } else if (words < 15 && !focusedFollowUpAnswered) {
     totalScore = Math.min(totalScore, 50);
+  }
+
+  if (lowQuality.isLowQuality) {
+    totalScore = Math.min(totalScore, lowQuality.cap);
+  }
+
+  if (!lowQuality.isLowQuality && focusedFollowUpAnswered) {
+    totalScore = Math.max(totalScore, words >= 12 ? 68 : 60);
+    totalScore = Math.min(totalScore, 78);
   }
 
   const strengths: string[] = [];
   const improvements: string[] = [];
 
+  if (lowQuality.isLowQuality) {
+    improvements.push(
+      "Avoid repeated filler text; answer the question with specific concepts, examples, and reasoning.",
+    );
+  }
+
   if (conceptQuestion) {
-    if (words >= 25 && signals.hasReasoning) {
+    if (!lowQuality.isLowQuality && words >= 25 && signals.hasReasoning) {
       strengths.push("You explained the concept with enough detail to show understanding.");
+    } else if (!lowQuality.isLowQuality && words >= 35 && hasExample) {
+      strengths.push("You gave a clear definition and practical example for the concept.");
     } else {
       improvements.push("Add a clearer definition and one practical example to show you understand the concept.");
     }
-  } else if (hasExample) {
+  } else if (focusedFollowUpAnswered) {
+    strengths.push("You directly answered the follow-up with a relevant point.");
+  } else if (!lowQuality.isLowQuality && hasExample) {
     strengths.push("You grounded your answer in a concrete example instead of staying too general.");
   } else {
     improvements.push("Anchor your answer in one specific situation and make your personal role clearer.");
   }
 
-  if (hasOutcome) {
+  if (!lowQuality.isLowQuality && hasOutcome) {
     strengths.push("You referenced the outcome or impact, which makes your answer more convincing.");
   } else if (!conceptQuestion) {
     improvements.push("Finish with a measurable result so the interviewer can judge the impact of your work.");
   }
 
-  if (words >= 40 && sentenceCount >= 3) {
+  if (!lowQuality.isLowQuality && words >= 40 && sentenceCount >= 3) {
     strengths.push("Your answer had enough detail to show structure, context, and progression.");
   } else {
     improvements.push("Add a bit more structure: situation, action, and result in separate clear steps.");

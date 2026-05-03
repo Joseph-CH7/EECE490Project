@@ -10,9 +10,8 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
 
 COPY requirements.txt ./requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install --retries 10 --timeout 300 -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir --retries 10 --timeout 300 -r requirements.txt
 
 COPY . ./
 

@@ -31,10 +31,17 @@ def health():
     return {"status": "ok"}
 
 
+@app.on_event("startup")
+def warm_semantic_model():
+    model = get_semantic_model()
+    model.encode(["warmup"])
+
+
 class EvaluationRequest(BaseModel):
     question: str
     expected_answer: str
     user_answer: str
+    evaluation_context: str | None = None
 
 
 class ProgressRequest(BaseModel):
@@ -206,23 +213,36 @@ def recommendation_from_insights(readiness: str, trend: str, skills: dict[str, A
 @app.post("/evaluate-challenge")
 def evaluate_challenge(data: EvaluationRequest):
     model = get_semantic_model()
-    expected_embedding = model.encode([data.expected_answer])
-    user_embedding = model.encode([data.user_answer])
-    question_embedding = model.encode([data.question])
+    evaluation_context = data.evaluation_context or (
+        f"{data.question}\n{data.expected_answer}"
+    )
+    expected_embedding, user_embedding, context_embedding = model.encode(
+        [data.expected_answer, data.user_answer, evaluation_context]
+    )
 
-    quality_similarity = cosine_similarity(user_embedding, expected_embedding)[0][0]
-    relevance_similarity = cosine_similarity(user_embedding, question_embedding)[0][0]
+    quality_similarity = cosine_similarity([user_embedding], [expected_embedding])[0][0]
+    relevance_similarity = cosine_similarity([user_embedding], [context_embedding])[0][0]
 
-    length_bonus = min(len(data.user_answer.split()) / 120, 1) * 0.15
-    structure_bonus = 0.1 if "\n" in data.user_answer or "-" in data.user_answer else 0
+    word_count = len(data.user_answer.split())
+    length_bonus = min(word_count / 140, 1) * 0.08
+    structure_bonus = 0.04 if "\n" in data.user_answer or "-" in data.user_answer else 0
 
     final_score = (
-        quality_similarity * 0.6
-        + relevance_similarity * 0.25
+        quality_similarity * 0.68
+        + relevance_similarity * 0.24
         + length_bonus
         + structure_bonus
     ) * 100
     final_score = clamp(float(final_score))
+
+    if quality_similarity < 0.9 or relevance_similarity < 0.88:
+        final_score = min(final_score, 92)
+    if quality_similarity < 0.84 or relevance_similarity < 0.8:
+        final_score = min(final_score, 86)
+    if quality_similarity < 0.72 or relevance_similarity < 0.68:
+        final_score = min(final_score, 76)
+    if word_count < 35:
+        final_score = min(final_score, 70)
 
     if final_score >= 80:
         label = "Excellent"

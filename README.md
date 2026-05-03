@@ -1,22 +1,39 @@
 # Real-Time Interview Simulator
 
-Real-Time Interview Simulator is a web application for interview preparation. It allows users to practice mock interviews, complete role-based challenges, receive feedback, save results, and track progress over time through a dashboard.
+Real-Time Interview Simulator is a web application for interview preparation. Users can upload or paste resume content, choose a target role, practice mock interviews, complete role-based challenges, receive feedback, save results, and track progress over time through a dashboard.
 
-The project was built for **EECE 490 - Introduction to Machine Learning**. It combines a **Next.js frontend**, **Clerk authentication**, **Firebase Firestore storage**, **API routes**, and a separate **machine learning service** for challenge answer evaluation.
+The project was built for **EECE 490 - Introduction to Machine Learning**. It combines a **Next.js frontend**, **Clerk authentication**, **Firebase Firestore storage**, **Next.js API routes**, trained local ML models, and a separate **FastAPI machine learning service** for challenge and progress evaluation.
+
+---
+
+## Problem and Motivation
+
+Interview preparation is often passive, generic, or expensive. Many students rely on static question lists, videos, or human coaching that may not adapt to their target role or resume.
+
+This project augments interview preparation by helping users answer three practical questions:
+
+- What role does my resume most closely match?
+- What kind of interview questions should I practice?
+- How are my answers improving over time?
+
+The system is intended for students, job seekers, university career centers, and interview-preparation platforms.
 
 ---
 
 ## Main Features
 
 - User authentication with Clerk
-- Mock interview practice
+- CV upload and resume-category detection
+- Manual category override for incorrect or missing CV predictions
+- Job-description-aware interview question selection
+- Randomized interview questions when no job description is provided
+- Technical and behavioral mock interview practice
+- Follow-up questions when the answer needs more detail
+- Camera-based visual-presence signals during interviews
 - Challenge-based practice
-- CV-based and job-description-based interview practice
-- Role-specific and interviewer-mode practice
-- Voice/speech-to-text answer input
 - ML-based challenge answer evaluation
-- Score prediction using a Random Forest Regressor
-- Quality label prediction using a Random Forest Classifier
+- Progress prediction using a Random Forest Regressor
+- Readiness label prediction using a Random Forest Classifier
 - Saved results in Firebase Firestore
 - Dashboard progress tracking and analytics
 - Feedback, recommendations, and readiness insights
@@ -25,7 +42,13 @@ The project was built for **EECE 490 - Introduction to Machine Learning**. It co
 
 ## How the App Works
 
-The user signs in, chooses an interview or challenge, submits an answer, receives feedback, and can later review results in the dashboard.
+1. The user signs in.
+2. The user selects or confirms a job category.
+3. The user optionally uploads a CV and/or enters a job description.
+4. The app generates role-appropriate interview questions.
+5. The user answers each question and optional follow-up.
+6. The app scores the answers and generates feedback.
+7. Results are saved and shown in the dashboard.
 
 ---
 
@@ -33,212 +56,153 @@ The user signs in, chooses an interview or challenge, submits an answer, receive
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Frontend | Next.js / React | User interface, pages, forms, dashboard, and client-side interaction |
-| Styling | Tailwind CSS | Responsive and clean user interface styling |
+| Frontend | Next.js / React | User interface, interview flow, setup flow, feedback, and dashboard |
+| Styling | Tailwind CSS | Responsive UI styling |
 | Authentication | Clerk | Sign-up, login, sessions, and user identity |
-| Database | Firebase Firestore | Stores interview results, challenge results, scores, labels, feedback, timestamps, and user IDs |
-| API Layer | Next.js API routes | Connects the frontend to the ML service and backend logic |
-| ML Service | Python / FastAPI | Runs challenge answer evaluation |
-| Embeddings | SentenceTransformer | Converts written answers into numerical semantic vectors |
-| Score Model | Random Forest Regressor | Predicts numerical score out of 100 |
-| Label Model | Random Forest Classifier | Predicts answer quality label |
-| Dataset | CSV | Stores labeled challenge answers used for training |
+| Database | Firebase Firestore | Stores user-specific interview and challenge results |
+| API Layer | Next.js API routes | Connects the frontend to backend logic and the ML service |
+| ML Service | Python / FastAPI | Serves challenge evaluation and progress prediction endpoints |
+| Text Features | TF-IDF | Converts resume and question text into numerical features |
+| Resume Model | LinearSVC | Predicts resume/job category |
+| Question Model | TF-IDF + classifier | Predicts whether questions are technical or behavioral |
+| Semantic Evaluation | SentenceTransformer + cosine similarity | Compares answer meaning against expected content |
+| Progress Model | Random Forest Regressor | Predicts the user's next expected score |
+| Readiness Model | Random Forest Classifier | Predicts readiness level from progress features |
+| Deployment | Docker / Docker Compose | Runs the frontend and ML API as reproducible services |
 
 ---
 
-## Authentication
+## Machine Learning Components
 
-The application uses **Clerk** for authentication.
+### Resume Classification
 
-Clerk handles:
+The resume classifier predicts the user's likely job category from raw CV or resume text.
 
-- User sign-up
-- User sign-in
-- User sessions
-- Logout
-- User identity
-- Protected user-specific pages
+```txt
+Input: resume text
+Features: TF-IDF text vectors
+Model: LinearSVC
+Output: job category
+```
 
-Each authenticated user receives a unique Clerk user ID. This ID is attached to saved interview and challenge results in Firestore. The dashboard then filters results using the current user ID so each user only sees their own data.
+This helps the system select questions that match the user's background. Because the resume model is not perfect, the app also allows the user to manually correct or override the detected category.
+
+### Question Taxonomy
+
+The question classifier organizes prompts as technical or behavioral.
+
+```txt
+Input: interview question text
+Features: TF-IDF text vectors
+Output: technical or behavioral
+```
+
+This makes the interview flow more balanced and prevents the system from relying only on manually grouped questions.
+
+### Semantic Answer Evaluation
+
+Challenge answers are evaluated using sentence embeddings and cosine similarity. This is useful because open-ended answers can express the same idea with different wording.
+
+```txt
+Input: question, expected answer, user answer
+Method: SentenceTransformer embeddings + cosine similarity
+Output: relevance, semantic similarity, score, feedback
+```
+
+### Progress and Readiness Prediction
+
+The dashboard uses structured performance features such as average score, recent average, trend change, consistency, attempt count, best score, and weakest skills.
+
+```txt
+Input: progress features
+Random Forest Regressor output: predicted next score
+Random Forest Classifier output: readiness level
+```
 
 ---
 
-## Database and Saved Results
+## Experimental Results
 
-The app uses **Firebase Firestore** as the cloud database.
+The project includes reproducible training and audit scripts in the `scripts` folder.
 
-Firestore stores:
+| Model / Dataset | Result |
+|---|---|
+| Curated question bank | 2,058 questions |
+| Balanced question dataset | 1,554 questions |
+| Question type classifier test accuracy | 99.36% |
+| Question type classifier mean CV macro F1 | 99.84% |
+| Source-holdout question classifier accuracy | 96.21% |
+| Resume category classifier test accuracy | 75.30% |
+| Resume category classifier macro F1 | 75.49% |
 
-- Interview attempts
-- Challenge attempts
-- User answers
-- Scores
-- Quality labels
-- Feedback
-- Timestamps
-- Clerk user IDs
-- User email when available
-
-Saved results are important because they allow the dashboard to show progress over time instead of only giving one-time feedback.
-
----
-
-## Machine Learning Component
-
-The challenge evaluation uses a supervised machine learning pipeline.
-
-The ML pipeline uses:
-
-1. **Text preprocessing**
-2. **Sentence embeddings**
-3. **Random Forest Regressor**
-4. **Random Forest Classifier**
-
-### Text Preprocessing
-
-Before evaluation, the submitted answer is prepared for the model. This includes handling empty input, removing unnecessary spacing, and combining useful context such as the answer and challenge difficulty.
-
-### Sentence Embeddings
-
-The answer is converted into a numerical vector using a SentenceTransformer embedding model.
-
-Embeddings are used because interview and challenge answers are open-ended. Two users can write different sentences but still express the same correct idea. Embeddings help represent the meaning of the answer instead of only checking exact keywords.
-
-### Random Forest Regressor
-
-The Random Forest Regressor predicts the numerical score of the answer.
-
-```txt
-Input: answer embedding
-Output: score out of 100
-```
-
-It is used because score prediction is a regression task. Each tree predicts a score, and the final prediction is based on the average of the trees.
-
-### Random Forest Classifier
-
-The Random Forest Classifier predicts the quality label of the answer.
-
-```txt
-Input: answer embedding
-Output: quality label
-```
-
-Example labels:
-
-- Weak
-- Acceptable
-- Strong
-
-It is used because label prediction is a classification task. Each tree votes for a label, and the final label is selected by majority vote.
-
----
-
-## Why This Is Supervised Learning
-
-The challenge model is supervised because it was trained using labeled examples.
-
-Each training example contains:
-
-```txt
-sample answer → score → quality label
-```
-
-The model learns the relationship between the answer embedding and the target outputs.
-
-The regressor learns:
-
-```txt
-answer embedding → numerical score
-```
-
-The classifier learns:
-
-```txt
-answer embedding → quality label
-```
+The source-holdout test is important because it evaluates whether the question-type model generalizes to a held-out source instead of only memorizing one dataset style.
 
 ---
 
 ## Baseline Comparison
 
-A simple baseline would use rules such as answer length, keyword overlap, presence of expected terms, and basic structure checks.
+A non-AI baseline can use:
 
-However, this is limited because users may express correct ideas using different wording.
+- Keyword matching
+- Answer length
+- Presence of expected terms
+- Rule-based structure checks
+- Manual category rules
 
-The ML approach improves on the baseline by using embeddings and supervised learning. This allows the system to evaluate answer meaning and quality patterns instead of relying only on exact keyword matches.
-
----
-
-## Dashboard
-
-The dashboard provides progress tracking and performance insights.
-
-It loads saved results from Firestore and calculates:
-
-- Total completed interviews
-- Total completed challenges
-- Average interview score
-- Average challenge score
-- Highest score
-- Recent attempts
-- Progress trend
-- Strongest areas
-- Weakest areas
-- Recommendations
-- Readiness insights
-
-The dashboard uses rule-based analytics and feature engineering for direct calculations such as averages, totals, and recent attempts.
-
-For readiness-style insights, dashboard features can include:
-
-- Total attempts
-- Average score
-- Recent average
-- Older average
-- Trend change
-- Consistency
-- Best score
-- Weakest categories
-
-These features help estimate whether the user is improving and what they should practice next.
+The baseline is interpretable and fast, but it struggles when users express correct ideas with different wording. The ML approach improves this by using learned text representations, supervised classification, and semantic similarity.
 
 ---
 
 ## Responsible ML
 
-Responsible ML is important because the app gives feedback that may affect how users judge their interview readiness.
+Responsible ML matters because the app gives feedback that may affect how users judge their interview readiness.
 
 ### Explainability
 
-The system gives a score with feedback instead of only showing a number. Feedback is connected to criteria such as relevance, clarity, completeness, structure, and professionalism.
+The system shows scores with strengths and improvement points instead of only showing a number. Feedback is connected to criteria such as relevance, clarity, completeness, examples, structure, and outcome.
 
 ### Fairness and Bias
 
-The system should not unfairly penalize users for writing style, language background, or non-native English phrasing. The dataset should include varied answer styles to improve fairness.
+The system should not unfairly penalize non-native English phrasing or different writing styles. The app should be tested with varied answer styles and resume formats.
 
 ### Privacy
 
-User answers may contain personal information. Results are linked to authenticated users and stored in Firestore so users only access their own history.
+CVs, answers, and scores may contain personal information. Results are linked to authenticated Clerk user IDs and stored in Firestore so users only access their own history.
 
 ### Robustness
 
-The system is tested with weak, average, strong, short, long, vague, and differently worded answers to understand how it behaves in different cases.
+The system is tested with short, long, vague, strong, weak, and differently worded answers. The resume model also includes a manual override because category prediction can be wrong for unusual or mixed-role resumes.
 
 ---
 
 ## Error Analysis
 
-Common error cases include:
+Known failure cases include:
 
-- Long but vague answers receiving high scores
-- Short but correct answers receiving low scores
-- Answers using different wording from the training examples
-- Polished answers that sound professional but miss the main point
-- Challenge answers being evaluated against the wrong challenge type
-- Feedback being too general
+- Resume categories can be confused when roles overlap.
+- Long but vague answers can sometimes receive too much credit.
+- Short but correct answers can sometimes be under-scored.
+- Follow-up questions can be too generic if the answer contains broad keywords.
+- Camera-based visual metrics are approximate and depend on lighting, position, and browser access.
+- Challenge answers can be evaluated poorly if the expected answer is too narrow.
 
-Possible improvements include adding more labeled examples, adding concise strong answers, adding weak long answers, balancing weak/acceptable/strong examples, adding expert-labeled data, and improving challenge-specific grouping.
+Possible improvements include adding more labeled examples, adding expert-labeled answers, improving calibration, expanding evaluation logs, and increasing test coverage across resume styles and question domains.
+
+---
+
+## Project Structure
+
+```txt
+app/                    Next.js pages and API routes
+components/             Reusable UI components
+data/                   Raw and processed datasets
+lib/                    Shared frontend/backend logic
+ml-service-dashboard/   FastAPI ML service for challenge/progress endpoints
+models/                 Saved trained models
+scripts/                Data processing, training, inference, and audit scripts
+sample_cvs/             Sample CV files for testing
+types/                  Shared TypeScript types
+```
 
 ---
 
@@ -258,6 +222,7 @@ You also need accounts/keys for:
 
 - Clerk authentication
 - Firebase Firestore
+
 ---
 
 ## Clone the Repository
@@ -300,18 +265,28 @@ NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_firebase_storage_bucket_here
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_firebase_messaging_sender_id_here
 NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id_here
 
-# Optional external feedback API, if used
+# Optional external feedback API
 GEMINI_API_KEY=your_gemini_api_key_here
 
 # ML Service
 ML_SERVICE_URL=http://localhost:8000
 ```
 
-Without valid environment variables, authentication, database storage, or feedback generation may not work correctly.
+Without valid environment variables, authentication, database storage, and external feedback generation may not work correctly.
 
 ---
 
-## Run the Frontend
+## Run Locally Without Docker
+
+Start the ML service:
+
+```bash
+cd ml-service-dashboard
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+In a second terminal, start the frontend from the project root:
 
 ```bash
 npm run dev
@@ -325,43 +300,9 @@ http://localhost:3000
 
 ---
 
-## Run the ML Service
+## Run with Docker
 
-Go to the ML service folder:
-
-```bash
-cd ml-service-challenges
-```
-
-Install Python dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Train the model if needed:
-
-```bash
-python train_model.py
-```
-
-Run the FastAPI service:
-
-```bash
-uvicorn api:app --reload --port 8000
-```
-
-The ML service should run on:
-
-```txt
-http://localhost:8000
-```
-
----
-
-## Running with Docker
-
-Since the repository includes a Docker setup, the app can be run with Docker Compose.
+The repository includes a Docker setup for the frontend and ML API.
 
 ```bash
 docker compose --env-file .env.local up --build
@@ -380,6 +321,22 @@ http://localhost:3000
 
 ---
 
+## Reproducible Experiments
+
+Useful scripts:
+
+```bash
+python scripts/dataset_summary.py
+python scripts/audit_dataset_readiness.py
+python scripts/train_question_type.py
+python scripts/train_question_type_by_source.py
+python scripts/train_resume_category.py
+```
+
+These scripts summarize the datasets, audit readiness, train models, and report evaluation metrics.
+
+---
+
 ## Testing
 
 The system can be tested using weak, acceptable, and strong answers.
@@ -387,17 +344,20 @@ The system can be tested using weak, acceptable, and strong answers.
 Example testing approach:
 
 ```txt
-Weak answer → should receive a low score and weak label
-Acceptable answer → should receive a medium score and acceptable label
-Strong answer → should receive a high score and strong label
+Weak answer: short, vague, or unrelated
+Acceptable answer: partially correct with some missing detail
+Strong answer: clear definition, example, tradeoff, and outcome
 ```
 
-Evaluation metrics:
+Evaluation checks:
 
-- Mean Absolute Error for the score regressor
-- Classification accuracy for the label classifier
-- Manual review of selected predictions
-- Score consistency for similar answers
+- Question generation matches the selected role or job description.
+- CV upload extracts text and predicts a reasonable category.
+- Manual category override changes the generated questions.
+- Weak answers receive lower scores than strong answers.
+- Follow-up answers are included in feedback when asked.
+- Dashboard shows only the signed-in user's saved history.
+- Docker Compose starts the frontend and ML API.
 
 ---
 
@@ -405,15 +365,15 @@ Evaluation metrics:
 
 The project has some limitations:
 
-- Dataset size is limited
-- Scores are based on a manually designed rubric
-- Answer quality can be subjective
-- The model may over-score long but vague answers
-- The model may under-score short but strong answers
-- More real user testing is needed
-- More expert-labeled answers would improve reliability
-- The app does not replace human interview practice
-- Feedback should be treated as guidance, not as a final judgment
+- Resume classification is useful but not perfect.
+- Dataset size and label quality limit model reliability.
+- Answer quality is partly subjective.
+- Scores are based on a designed rubric and model estimates.
+- The app may over-score long but vague answers.
+- The app may under-score short but correct answers.
+- Camera metrics are approximate and browser-dependent.
+- More expert-labeled answers would improve reliability.
+- The app does not replace human interview practice.
 
 ---
 
@@ -421,13 +381,13 @@ The project has some limitations:
 
 Future improvements include:
 
-- Expanding the training dataset
+- Expanding the resume and answer datasets
 - Adding expert-labeled answers
-- Improving evaluation logs and test cases
-- Adding stronger model calibration
-- Improving feedback specificity
+- Improving calibration for scores
 - Adding more fairness and robustness tests
-- Improving deployment and reproducibility
+- Improving deployment monitoring
+- Adding more detailed ablation results
+- Improving voice delivery metrics for filler words, pauses, and speaking rate
 
 ---
 

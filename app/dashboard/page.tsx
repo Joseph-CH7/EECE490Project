@@ -49,6 +49,7 @@ type InterviewRow = Interview & {
 
 type Challenge = {
   id?: string;
+  attemptId?: string;
   challengeId?: number;
   title?: string;
   major?: string;
@@ -495,20 +496,45 @@ function dedupeInterviews(items: Interview[]) {
   return [...byKey.values()];
 }
 
-function dedupeByIdentity<T extends { id?: string; date?: string; score?: number }>(
-  items: T[],
-) {
-  const seen = new Set<string>();
-  const deduped: T[] = [];
-
-  for (const item of items) {
-    const key = item.id || `${item.date || "no-date"}-${item.score ?? "no-score"}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(item);
+function getChallengeDedupeKey(challenge: Challenge) {
+  if (challenge.attemptId) {
+    return `attempt:${challenge.attemptId}`;
   }
 
-  return deduped;
+  return [
+    Number(challenge.challengeId) || normalizeIdentityText(challenge.title),
+    Math.round((Number(challenge.score) || 0) * 10) / 10,
+    normalizeIdentityText(challenge.answer),
+  ].join(":");
+}
+
+function dedupeChallenges(items: Challenge[]) {
+  const byKey = new Map<string, Challenge>();
+
+  items.forEach((item) => {
+    const key = getChallengeDedupeKey(item);
+    const existing = byKey.get(key);
+
+    if (!existing) {
+      byKey.set(key, item);
+      return;
+    }
+
+    const existingHasDbId = Boolean(existing.id);
+    const itemHasDbId = Boolean(item.id);
+    const existingHasMlMetrics = Boolean(
+      existing.qualitySimilarity || existing.relevanceSimilarity,
+    );
+    const itemHasMlMetrics = Boolean(
+      item.qualitySimilarity || item.relevanceSimilarity,
+    );
+
+    if ((!existingHasDbId && itemHasDbId) || (!existingHasMlMetrics && itemHasMlMetrics)) {
+      byKey.set(key, item);
+    }
+  });
+
+  return [...byKey.values()];
 }
 
 function buildInterviewRows(interviews: Interview[]): InterviewRow[] {
@@ -581,10 +607,12 @@ export default function DashboardPage() {
         localStorage.getItem(`challenges:${user.id}`) || "[]",
       );
       const cleanLocalInterviews = dedupeInterviews(localInterviews);
+      const cleanLocalChallenges = dedupeChallenges(localChallenges);
 
       setInterviews(cleanLocalInterviews);
-      setChallenges(localChallenges);
+      setChallenges(cleanLocalChallenges);
       localStorage.setItem(`interviews:${user.id}`, JSON.stringify(cleanLocalInterviews));
+      localStorage.setItem(`challenges:${user.id}`, JSON.stringify(cleanLocalChallenges));
 
       try {
         const [interviewSnapshot, challengeSnapshot] = await Promise.all([
@@ -623,7 +651,7 @@ export default function DashboardPage() {
         });
 
         const mergedInterviews = dedupeInterviews([...dbInterviews, ...cleanLocalInterviews]);
-        const mergedChallenges = dedupeByIdentity([...dbChallenges, ...localChallenges]);
+        const mergedChallenges = dedupeChallenges([...dbChallenges, ...cleanLocalChallenges]);
 
         setInterviews(mergedInterviews);
         setChallenges(mergedChallenges);
@@ -633,8 +661,9 @@ export default function DashboardPage() {
       } catch (error) {
         console.error("Could not load dashboard data from Firebase:", error);
         const fallbackInterviews = JSON.parse(localStorage.getItem(`interviews:${user.id}`) || "[]");
+        const fallbackChallenges = JSON.parse(localStorage.getItem(`challenges:${user.id}`) || "[]");
         setInterviews(dedupeInterviews(fallbackInterviews));
-        setChallenges(JSON.parse(localStorage.getItem(`challenges:${user.id}`) || "[]"));
+        setChallenges(dedupeChallenges(fallbackChallenges));
       }
     }
 

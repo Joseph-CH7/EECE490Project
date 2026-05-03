@@ -13,6 +13,11 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         question: body.question,
         expected_answer: body.expected_answer,
+        evaluation_context:
+          body.evaluation_context ||
+          [body.question, body.task, body.rubric, body.expected_answer]
+            .filter(Boolean)
+            .join("\n"),
         user_answer: body.user_answer,
       }),
     });

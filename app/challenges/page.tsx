@@ -548,17 +548,26 @@ useEffect(() => {
   return () => clearInterval(timer);
 }, [activeChallenge, submitted, timeLeft]);
 async function saveChallengeResult(savedChallenge: any) {
+  const attemptId =
+    savedChallenge.attemptId ||
+    (typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const challengeToSave = {
     ...savedChallenge,
+    attemptId,
     userId: user?.id || "guest",
     userEmail: user?.primaryEmailAddress?.emailAddress || "",
   };
   const storageKey = user?.id ? `challenges:${user.id}` : "challenges";
   const oldChallenges = JSON.parse(localStorage.getItem(storageKey) || "[]");
+  const oldChallengesWithoutSameAttempt = oldChallenges.filter(
+    (challenge: any) => challenge.attemptId !== attemptId,
+  );
 
   localStorage.setItem(
     storageKey,
-    JSON.stringify([challengeToSave, ...oldChallenges])
+    JSON.stringify([challengeToSave, ...oldChallengesWithoutSameAttempt])
   );
 
   // Also save to Firebase for real dashboard persistence
@@ -643,6 +652,12 @@ async function saveChallengeResult(savedChallenge: any) {
         body: JSON.stringify({
           question: activeChallenge.prompt,
           expected_answer: activeChallenge.sampleAnswer,
+          evaluation_context: [
+            activeChallenge.prompt,
+            ...activeChallenge.tasks,
+            ...activeChallenge.rubric.map((item: any) => item.point),
+            activeChallenge.sampleAnswer,
+          ].join("\n"),
           user_answer: answer,
         }),
       });
@@ -654,6 +669,7 @@ async function saveChallengeResult(savedChallenge: any) {
       const result = await response.json();
 
       const wordCount = answer.trim().split(/\s+/).filter(Boolean).length;
+      const rubricResult = evaluateAnswer(answer, activeChallenge);
 
       const evaluationResult = {
         score: result.score,
@@ -661,8 +677,8 @@ async function saveChallengeResult(savedChallenge: any) {
         feedback: result.feedback,
         quality_similarity: result.quality_similarity,
         relevance_similarity: result.relevance_similarity,
-        results: [],
-        missingPoints: [],
+        results: rubricResult.results,
+        missingPoints: rubricResult.missingPoints || [],
         wordCount,
         usedML: true,
       };
@@ -677,6 +693,9 @@ async function saveChallengeResult(savedChallenge: any) {
         feedback: evaluationResult.feedback,
         answer,
         sampleAnswer: activeChallenge.sampleAnswer,
+        missingPoints: rubricResult.missingPoints || [],
+        coveredPoints:
+          rubricResult.results?.filter((item: any) => item.matched) || [],
         qualitySimilarity: evaluationResult.quality_similarity,
         relevanceSimilarity: evaluationResult.relevance_similarity,
         testedSkills: activeChallenge.testedSkills,
@@ -907,7 +926,7 @@ saveChallengeResult(savedChallenge);
                         </div>
 
                         <div className="bg-white/10 rounded-xl p-3">
-                          <p className="text-slate-400">Question Relevance</p>
+                          <p className="text-slate-400">Context Match</p>
                           <p className="font-bold">
                             {evaluation.relevance_similarity}
                           </p>
@@ -924,7 +943,7 @@ saveChallengeResult(savedChallenge);
                     </p>
                   </div>
 
-                  {!evaluation.usedML && evaluation.results?.length > 0 && (
+                  {evaluation.results?.length > 0 && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {evaluation.results.map((item: any) => (
                         <div
@@ -959,8 +978,7 @@ saveChallengeResult(savedChallenge);
                     </div>
                   )}
 
-                  {!evaluation.usedML &&
-                    evaluation.missingPoints?.length > 0 && (
+                  {evaluation.missingPoints?.length > 0 && (
                       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
                         <h3 className="font-bold text-amber-900 mb-2">
                           What to Improve

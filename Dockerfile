@@ -44,10 +44,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY frontend-python-requirements.txt ./frontend-python-requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-  python3 -m venv /opt/venv \
-  && python -m pip install --upgrade pip setuptools wheel \
-  && python -m pip install --retries 10 --timeout 300 -r frontend-python-requirements.txt
+RUN python3 -m venv /opt/venv \
+  && python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+  && python -m pip install --no-cache-dir --retries 10 --timeout 300 -r frontend-python-requirements.txt
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
