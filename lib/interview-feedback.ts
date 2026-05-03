@@ -26,6 +26,8 @@ export type LiveInterviewFeedback = {
 export type InterviewFeedbackEntry = {
   question: string;
   answer: string;
+  sessionId?: string;
+  questionNumber?: number;
   followUpQuestion?: string;
   followUpAnswer?: string;
   followUpFeedback?: LiveInterviewFeedback;
@@ -287,6 +289,7 @@ export function extractCandidateKeywords(text: string) {
     "indexing",
     "transactions",
     "acid",
+    "sql injection",
     "machine learning",
     "deep learning",
     "data pipeline",
@@ -447,6 +450,23 @@ export function extractCandidateKeywords(text: string) {
     .slice(0, 6);
 }
 
+function keywordAppearsInQuestion(keyword: string, question: string) {
+  const normalizedKeyword = keyword.toLowerCase().trim();
+  const normalizedQuestion = question.toLowerCase();
+
+  if (!normalizedKeyword) {
+    return false;
+  }
+
+  return countKeywordMentions(normalizedQuestion, normalizedKeyword) > 0;
+}
+
+export function extractNewAnswerKeywords(answer: string, currentQuestion: string) {
+  return extractCandidateKeywords(answer).filter(
+    (keyword) => !keywordAppearsInQuestion(keyword, currentQuestion),
+  );
+}
+
 export function extractQuestionFocusConcept(question: string) {
   const lowered = question.toLowerCase();
   const knownConcepts = [
@@ -460,6 +480,7 @@ export function extractQuestionFocusConcept(question: string) {
     "indexing",
     "transactions",
     "acid",
+    "sql injection",
     "sql",
     "nosql",
     "authentication",
@@ -608,10 +629,17 @@ function buildTechnicalFollowUp(
   const loweredQuestion = currentQuestion.toLowerCase();
   const loweredAnswer = answer.toLowerCase();
   const questionConcept = extractQuestionFocusConcept(currentQuestion);
+  const answerAlreadyHasExample = mentionsExample(answer);
 
   if (isConceptQuestion(currentQuestion)) {
     if (questionConcept?.includes("normalization")) {
       return "You explained normalization. Can you give a small example of moving data from an unnormalized table into first or second normal form, and what redundancy that removes?";
+    }
+
+    if (questionConcept?.includes("foreign key")) {
+      return answerAlreadyHasExample
+        ? "Good. What is one common mistake when using foreign keys, and how would you avoid it?"
+        : "Good. Can you give a small example of two related tables and explain how the foreign key protects referential integrity?";
     }
 
     if (/\bjava\b/.test(loweredQuestion) && /\bjavascript\b/.test(loweredQuestion)) {
@@ -630,8 +658,14 @@ function buildTechnicalFollowUp(
       return "Good. Can you give one use case where SQL is the better choice and one use case where NoSQL is the better choice?";
     }
 
+    if (questionConcept?.includes("sql injection")) {
+      return "Good. Can you give a small example of a vulnerable query and explain how parameterized queries prevent that attack?";
+    }
+
     if (questionConcept) {
-      return `You explained ${questionConcept}. Can you give a practical example and one limitation or common mistake to watch for?`;
+      return answerAlreadyHasExample
+        ? `You explained ${questionConcept}. What is one limitation or common mistake to watch for?`
+        : `You explained ${questionConcept}. Can you give a practical example and one limitation or common mistake to watch for?`;
     }
   }
 
@@ -794,7 +828,10 @@ export function buildCoachingReply(
   const signals = getAnswerSignals(answer);
   const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
   const conceptQuestion = isConceptQuestion(currentQuestion);
-  const answerKeywords = extractCandidateKeywords(answer);
+  const answerKeywords = extractNewAnswerKeywords(answer, currentQuestion);
+  const mentionedToolIsNew =
+    Boolean(signals.mentionedTool) &&
+    !keywordAppearsInQuestion(signals.mentionedTool || "", currentQuestion);
 
   if (isSqlNoSqlQuestion(currentQuestion) && words >= 12) {
     return "Good. Can you give one specific case where SQL is the better choice and one specific case where NoSQL is the better choice?";
@@ -817,7 +854,7 @@ export function buildCoachingReply(
       return buildTechnicalFollowUp(answer, currentQuestion, answerKeywords);
     }
 
-    if (signals.hasTool && !signals.hasTradeoff) {
+    if (signals.hasTool && mentionedToolIsNew && !signals.hasTradeoff) {
       return `You mentioned ${signals.mentionedTool}. Why was that the right choice here, and what alternative would you compare it against?`;
     }
 
@@ -842,7 +879,7 @@ export function buildCoachingReply(
     return "You mentioned a challenge there. How did you decide on your approach, and why did you choose it over the main alternative?";
   }
 
-  if (signals.hasTool && !signals.hasTradeoff) {
+  if (signals.hasTool && mentionedToolIsNew && !signals.hasTradeoff) {
     return `You mentioned ${signals.mentionedTool}. Why was that the right choice for this situation, and what would have been the main alternative?`;
   }
 

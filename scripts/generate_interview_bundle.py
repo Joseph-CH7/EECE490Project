@@ -90,6 +90,7 @@ HIGH_PRIORITY_TERMS = {
 
 BAD_QUESTION_PATTERNS = (
     "when would you use sql injection over big o notation",
+    "explain the difference between sql injection and big o notation",
     "rest api over virtual memory",
     "rest api over stack",
     "rest api over linked list",

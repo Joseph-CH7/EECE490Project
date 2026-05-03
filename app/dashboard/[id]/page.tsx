@@ -45,21 +45,8 @@ function getChronologicalReviewTitle(items: SavedQuestion[], index: number) {
     (savedItem) => savedItem.originalIndex === index,
   );
   const safeIndex = chronologicalIndex >= 0 ? chronologicalIndex : index;
-  const sessionKeys: string[] = [];
-  let displaySessionNumber = 1;
-
-  chronological.forEach((savedItem, itemIndex) => {
-    const key = savedItem.sessionId || `legacy:${Math.floor(itemIndex / 4) + 1}`;
-
-    if (!sessionKeys.includes(key)) {
-      sessionKeys.push(key);
-    }
-
-    if (savedItem.originalIndex === index) {
-      displaySessionNumber = sessionKeys.indexOf(key) + 1;
-    }
-  });
-  const questionNumber = Number(item.questionNumber) || (safeIndex % 4) + 1;
+  const displaySessionNumber = Math.floor(safeIndex / 4) + 1;
+  const questionNumber = (safeIndex % 4) + 1;
 
   return `Interview ${displaySessionNumber} - Question ${questionNumber}`;
 }

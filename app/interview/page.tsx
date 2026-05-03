@@ -204,6 +204,10 @@ export default function InterviewPage() {
       return null;
     }
 
+    if (!currentSessionIdRef.current) {
+      currentSessionIdRef.current = `interview-${Date.now()}`;
+    }
+
     const savedEntries = localStorage.getItem(getUserStorageKey("interviewFeedbackEntries"));
     let entries: InterviewFeedbackEntry[] = [];
 
@@ -215,9 +219,17 @@ export default function InterviewPage() {
       }
     }
 
-    const nextEntries = [...entries, nextEntry];
+    const sessionEntries = entries.filter(
+      (entry) => entry.sessionId === currentSessionIdRef.current,
+    );
+    const questionNumber = sessionEntries.length + 1;
+    const entryWithSession: InterviewFeedbackEntry = {
+      ...nextEntry,
+      sessionId: currentSessionIdRef.current,
+      questionNumber,
+    };
+    const nextEntries = [...sessionEntries, entryWithSession];
     const sessionFeedback = buildSessionInterviewFeedback(nextEntries);
-    const questionNumber = nextEntries.length;
 
     localStorage.setItem(getUserStorageKey("interviewFeedbackEntries"), JSON.stringify(nextEntries));
 
@@ -229,13 +241,13 @@ export default function InterviewPage() {
   const interviews = JSON.parse(localStorage.getItem(getUserStorageKey("interviews")) || "[]");
 
   const savedInterview = {
-    question: nextEntry.question,
-    answer: nextEntry.answer,
+    question: entryWithSession.question,
+    answer: entryWithSession.answer,
     sessionId: currentSessionIdRef.current,
     sessionNumber: currentSessionNumberRef.current,
     questionNumber,
-    score: nextEntry.feedback.totalScore,
-    feedback: nextEntry.feedback,
+    score: entryWithSession.feedback.totalScore,
+    feedback: entryWithSession.feedback,
     date: new Date().toISOString(),
     userId: user?.id || "guest",
     userEmail: user?.primaryEmailAddress?.emailAddress || "",
@@ -288,11 +300,15 @@ export default function InterviewPage() {
       }
     }
 
-    if (!entries.length) {
+    const sessionEntries = entries.filter(
+      (entry) => entry.sessionId === currentSessionIdRef.current,
+    );
+
+    if (!sessionEntries.length) {
       return null;
     }
 
-    const updatedEntries = [...entries];
+    const updatedEntries = [...sessionEntries];
     const lastEntry = updatedEntries[updatedEntries.length - 1];
 
     const combinedFeedback = followUpFeedback
@@ -330,9 +346,20 @@ export default function InterviewPage() {
 
     if (savedInterviews.length) {
       const updatedInterviews = [...savedInterviews];
-      const lastInterview = updatedInterviews[updatedInterviews.length - 1];
+      const targetInterviewIndex = [...updatedInterviews]
+        .reverse()
+        .findIndex(
+          (interview: { sessionId?: string; questionNumber?: number }) =>
+            interview.sessionId === currentSessionIdRef.current &&
+            Number(interview.questionNumber) === Number(lastEntry.questionNumber),
+        );
+      const resolvedIndex =
+        targetInterviewIndex >= 0
+          ? updatedInterviews.length - 1 - targetInterviewIndex
+          : updatedInterviews.length - 1;
+      const lastInterview = updatedInterviews[resolvedIndex];
 
-      updatedInterviews[updatedInterviews.length - 1] = {
+      updatedInterviews[resolvedIndex] = {
         ...lastInterview,
         followUpQuestion,
         followUpAnswer,
@@ -478,6 +505,11 @@ export default function InterviewPage() {
     setInterviewComplete(false);
 
     if (typeof window !== "undefined") {
+      localStorage.setItem("currentInterviewSessionId", currentSessionIdRef.current);
+      localStorage.setItem(
+        getUserStorageKey("currentInterviewSessionId"),
+        currentSessionIdRef.current,
+      );
       localStorage.removeItem("latestInterviewAnswer");
       localStorage.removeItem("latestInterviewQuestion");
       localStorage.removeItem("latestInterviewReply");

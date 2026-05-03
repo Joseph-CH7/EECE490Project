@@ -5,6 +5,7 @@ import {
   buildCoachingReply,
   buildInterviewFeedback,
   extractCandidateKeywords,
+  extractNewAnswerKeywords,
   extractQuestionFocusConcept,
   type LiveInterviewFeedback,
   type VisualMetrics,
@@ -58,6 +59,20 @@ function answerHasExample(answer: string) {
     "payment system",
     "chat app",
     "social media",
+  ]);
+}
+
+function followUpAsksForExample(followUp: string) {
+  const lowered = followUp.toLowerCase();
+
+  return containsAny(lowered, [
+    "give a practical example",
+    "give an example",
+    "can you give",
+    "provide an example",
+    "specific example",
+    "small example",
+    "use case",
   ]);
 }
 
@@ -218,6 +233,10 @@ function hasClosurePrompt(question: string) {
   return question.toLowerCase().includes("closure");
 }
 
+function hasSqlInjectionPrompt(question: string) {
+  return question.toLowerCase().includes("sql injection");
+}
+
 function tokenize(value: string) {
   return value
     .toLowerCase()
@@ -267,6 +286,7 @@ function isValidModelFollowUp(
   focusKeyword: string,
   currentQuestion: string,
   groundedKeywords: string[],
+  answerAlreadyHasExample: boolean,
 ) {
   if (!followUp || looksGenericFollowUp(followUp)) {
     return false;
@@ -305,7 +325,29 @@ function isValidModelFollowUp(
     return false;
   }
 
+  if (
+    hasSqlInjectionPrompt(currentQuestion) &&
+    ![
+      "sql injection",
+      "parameterized",
+      "prepared statement",
+      "input validation",
+      "sanitize",
+      "query",
+    ].some((term) => loweredFollowUp.includes(term))
+  ) {
+    return false;
+  }
+
   if (similarityScore(followUp, currentQuestion) > 0.72) {
+    return false;
+  }
+
+  if (
+    answerAlreadyHasExample &&
+    isConceptPrompt(currentQuestion) &&
+    followUpAsksForExample(followUp)
+  ) {
     return false;
   }
 
@@ -351,11 +393,11 @@ async function buildGeminiFeedback(
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-  const answerKeywords = extractCandidateKeywords(answer);
+  const answerKeywords = extractNewAnswerKeywords(answer, currentQuestion);
   const questionFocusConcept = extractQuestionFocusConcept(currentQuestion);
   const groundedKeywords = [
-    ...(questionFocusConcept ? [questionFocusConcept] : []),
     ...answerKeywords.filter((keyword) => keyword !== questionFocusConcept),
+    ...(isConceptPrompt(currentQuestion) && questionFocusConcept ? [questionFocusConcept] : []),
   ];
   const keywordHint = groundedKeywords.length ? groundedKeywords.join(", ") : "none";
 
@@ -431,7 +473,13 @@ Scoring guidance:
   const modelFollowUp = normalizeText(parsed.followUp);
   const focusKeyword = normalizeText(parsed.focusKeyword);
   const followUp =
-    isValidModelFollowUp(modelFollowUp, focusKeyword, currentQuestion, groundedKeywords)
+    isValidModelFollowUp(
+      modelFollowUp,
+      focusKeyword,
+      currentQuestion,
+      groundedKeywords,
+      answerHasExample(answer),
+    )
       ? modelFollowUp
       : localFollowUp;
   const finalFollowUp =
@@ -439,6 +487,13 @@ Scoring guidance:
     !(followUp.toLowerCase().includes("sql") || followUp.toLowerCase().includes("nosql"))
       ? sqlNoSqlFollowUp()
       : followUp;
+  const guardedFollowUp =
+    hasSqlInjectionPrompt(currentQuestion) &&
+    !finalFollowUp.toLowerCase().includes("injection") &&
+    !finalFollowUp.toLowerCase().includes("parameterized") &&
+    !finalFollowUp.toLowerCase().includes("prepared statement")
+      ? "Good. Can you give a small example of a vulnerable query and explain how parameterized queries prevent SQL injection?"
+      : finalFollowUp;
 
   const feedback: LiveInterviewFeedback = {
     ...baselineFeedback,
@@ -449,11 +504,11 @@ Scoring guidance:
     delivery,
     strengths: listFromModel(parsed.strengths, baselineFeedback.strengths),
     improvements: listFromModel(parsed.improvements, baselineFeedback.improvements),
-    followUp: finalFollowUp,
+    followUp: guardedFollowUp,
   };
 
   return {
-    reply: finalFollowUp,
+    reply: guardedFollowUp,
     feedback,
   };
 }

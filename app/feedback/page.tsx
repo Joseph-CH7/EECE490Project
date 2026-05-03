@@ -285,10 +285,12 @@ export default function FeedbackPage() {
             </Button>
           </Link>
 
-          <Button className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600">
-            Start New Interview
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
+          <Link href="/setup">
+            <Button className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600">
+              Start New Interview
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </Link>
         </div>
           </>
         )}

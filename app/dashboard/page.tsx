@@ -345,6 +345,8 @@ function getProgressInsights(
   }
 
   if (trend === "Dropping" || trend === "Needs Consistency") {
+    readinessReason =
+      "Your overall progress is close, but recent attempts dropped. Focus on consistency and clearer answers next.";
     recommendation =
       "Repeat one medium-difficulty challenge and focus on clearer structure, examples, and complete reasoning.";
   }
@@ -513,21 +515,16 @@ function buildInterviewRows(interviews: Interview[]): InterviewRow[] {
   const chronological = interviews
     .map((item, index) => ({ ...item, originalIndex: index }))
     .sort((a, b) => getDateValue(a.date) - getDateValue(b.date));
-  const sessionKeys: string[] = [];
 
   return chronological.map((interview, chronologicalIndex) => {
-    const sessionKey = getInterviewSessionKey(interview, chronologicalIndex);
-
-    if (!sessionKeys.includes(sessionKey)) {
-      sessionKeys.push(sessionKey);
-    }
+    const displaySessionNumber = Math.floor(chronologicalIndex / 4) + 1;
+    const displayQuestionNumber = (chronologicalIndex % 4) + 1;
 
     return {
       ...interview,
-      sessionKey,
-      displaySessionNumber: sessionKeys.indexOf(sessionKey) + 1,
-      displayQuestionNumber:
-        Number(interview.questionNumber) || (chronologicalIndex % 4) + 1,
+      sessionKey: `display:${displaySessionNumber}`,
+      displaySessionNumber,
+      displayQuestionNumber,
     };
   });
 }
