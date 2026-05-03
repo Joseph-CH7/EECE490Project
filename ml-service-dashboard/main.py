@@ -26,6 +26,11 @@ PROGRESS_MODEL_PATH = Path(__file__).with_name("progress_model.joblib")
 progress_artifact = joblib.load(PROGRESS_MODEL_PATH) if PROGRESS_MODEL_PATH.exists() else None
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 class EvaluationRequest(BaseModel):
     question: str
     expected_answer: str

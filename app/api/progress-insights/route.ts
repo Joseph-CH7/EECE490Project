@@ -3,8 +3,9 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    const mlServiceUrl = process.env.ML_SERVICE_URL || "http://127.0.0.1:8000";
 
-    const response = await fetch("http://127.0.0.1:8000/predict-progress", {
+    const response = await fetch(`${mlServiceUrl.replace(/\/$/, "")}/predict-progress`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

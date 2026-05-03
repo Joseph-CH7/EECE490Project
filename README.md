@@ -112,6 +112,39 @@ http://localhost:3000
 
 ---
 
+### Run with Docker
+
+The Docker setup runs the application as two services:
+
+- `frontend`: the Next.js user interface on port `3000`
+- `ml-api`: the FastAPI ML service on port `8000`
+
+Make sure `.env.local` contains the required Clerk, Firebase, and feedback API keys, then run:
+
+```bash
+docker compose --env-file .env.local up --build
+```
+
+Open the app in your browser:
+
+```txt
+http://localhost:3000
+```
+
+The frontend calls the ML API through the internal Docker service URL:
+
+```env
+ML_SERVICE_URL=http://ml-api:8000
+```
+
+For local non-Docker development, the app falls back to:
+
+```env
+ML_SERVICE_URL=http://localhost:8000
+```
+
+---
+
 ## App overview
 
 The home page gives users access to the main interview practice flow, the challenge section, and the dashboard.

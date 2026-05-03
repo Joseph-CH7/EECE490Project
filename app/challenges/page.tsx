@@ -635,13 +635,7 @@ async function saveChallengeResult(savedChallenge: any) {
     setIsEvaluating(true);
 
     try {
-      const mlServiceUrl = process.env.NEXT_PUBLIC_CHALLENGE_ML_SERVICE_URL;
-
-      if (!mlServiceUrl) {
-        throw new Error("Local challenge ML service is not configured.");
-      }
-
-      const response = await fetch(`${mlServiceUrl.replace(/\/$/, "")}/score`, {
+      const response = await fetch("/api/evaluate-challenge", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
