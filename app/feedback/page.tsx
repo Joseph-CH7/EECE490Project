@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useUser } from "@clerk/nextjs";
 import { ArrowLeft, ArrowRight, Sparkles, Star } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,26 +10,35 @@ import { Badge } from "@/components/ui/badge";
 import type { InterviewSessionFeedback } from "@/lib/interview-feedback";
 
 export default function FeedbackPage() {
-  const [feedback] = useState<InterviewSessionFeedback | null>(() => {
+  const { user, isLoaded } = useUser();
+  const [feedback, setFeedback] = useState<InterviewSessionFeedback | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded) return;
     if (typeof window === "undefined") {
-      return null;
+      setFeedback(null);
+      return;
     }
 
+    const storageKey = user?.id
+      ? `interviewSessionFeedback:${user.id}`
+      : "interviewSessionFeedback";
     const savedFeedback =
-      localStorage.getItem("interviewSessionFeedback");
+      localStorage.getItem(storageKey);
 
     if (!savedFeedback) {
-      return null;
+      setFeedback(null);
+      return;
     }
 
     try {
       const parsed = JSON.parse(savedFeedback) as InterviewSessionFeedback;
-      return parsed.entries?.length && parsed.answerCount > 0 ? parsed : null;
+      setFeedback(parsed.entries?.length && parsed.answerCount > 0 ? parsed : null);
     } catch (error) {
       console.error("Could not parse saved session feedback:", error);
-      return null;
+      setFeedback(null);
     }
-  });
+  }, [isLoaded, user?.id]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -116,16 +126,22 @@ export default function FeedbackPage() {
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-sm text-slate-300">Example Coverage</p>
+                  <p className="text-sm text-slate-300">Concrete Examples</p>
                   <p className="mt-1 text-2xl font-bold text-white">
                     {Math.round(feedback.includesExampleRate * 100)}%
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    Answers with a specific use case or real scenario.
                   </p>
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-sm text-slate-300">Outcome Coverage</p>
+                  <p className="text-sm text-slate-300">Results / Impact</p>
                   <p className="mt-1 text-2xl font-bold text-white">
                     {Math.round(feedback.includesOutcomeRate * 100)}%
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    Most useful for project and behavioral answers.
                   </p>
                 </div>
               </div>
@@ -145,6 +161,19 @@ export default function FeedbackPage() {
                       <p className="mt-3 line-clamp-4 text-sm leading-7 text-slate-200">
                         {entry.answer}
                       </p>
+                      {entry.followUpQuestion && entry.followUpAnswer ? (
+                        <div className="mt-3 rounded-2xl bg-slate-950/40 p-3 text-sm leading-6 text-slate-200">
+                          <p className="font-semibold text-emerald-200">Follow-up</p>
+                          <p className="mt-1">{entry.followUpQuestion}</p>
+                          <p className="mt-2 font-semibold text-emerald-200">Your follow-up answer</p>
+                          <p className="mt-1">{entry.followUpAnswer}</p>
+                          {entry.followUpFeedback ? (
+                            <p className="mt-2 text-xs text-slate-300">
+                              Follow-up score: {entry.followUpFeedback.totalScore}/100
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div className="mt-3 flex items-center justify-between text-sm text-slate-200">
                         <span>Score: {entry.feedback.totalScore}/100</span>
                         <span>Length: {entry.feedback.answerLength} words</span>
@@ -192,7 +221,9 @@ export default function FeedbackPage() {
 
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">Visual Presence</p>
-                  <p className="mt-1 text-xl font-bold">{feedback.visualPresence}</p>
+                  <p className="mt-1 text-xl font-bold">
+                    {feedback.visualMetrics ? feedback.visualPresence : "Not enabled"}
+                  </p>
                 </div>
               </div>
 

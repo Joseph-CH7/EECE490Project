@@ -9,12 +9,45 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 
+const CATEGORY_OPTIONS = [
+  { value: "software_engineering", label: "Software Engineering" },
+  { value: "data_science", label: "Data Science" },
+  { value: "human_resources", label: "Human Resources" },
+  { value: "finance", label: "Finance" },
+  { value: "design_creative", label: "Design / Creative" },
+  { value: "education", label: "Education" },
+  { value: "healthcare", label: "Healthcare" },
+  { value: "hospitality", label: "Hospitality" },
+  { value: "business_development", label: "Business Development" },
+  { value: "construction", label: "Construction" },
+  { value: "fitness_wellness", label: "Fitness / Wellness" },
+];
+
+function normalizeCategoryInput(value: string) {
+  const cleaned = value.trim().toLowerCase();
+  const exact = CATEGORY_OPTIONS.find(
+    (option) =>
+      option.value === cleaned ||
+      option.label.toLowerCase() === cleaned,
+  );
+
+  if (exact) {
+    return exact.value;
+  }
+
+  return cleaned
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 export default function SetupPage() {
   const router = useRouter();
 
   const [cvFileName, setCvFileName] = useState("");
   const [extractedCvText, setExtractedCvText] = useState("");
   const [detectedCategory, setDetectedCategory] = useState("");
+  const [categoryOverride, setCategoryOverride] = useState("Software Engineering");
   const [extractedCharacterCount, setExtractedCharacterCount] = useState(0);
   const [cvText, setCvText] = useState("");
   const [jobDescription, setJobDescription] = useState("");
@@ -55,7 +88,9 @@ export default function SetupPage() {
       }
 
       setExtractedCvText(data.text || "");
-      setDetectedCategory(data.displayCategory || data.inferredCategory || "");
+      const nextCategory = data.displayCategory || data.inferredCategory || "";
+      setDetectedCategory(nextCategory);
+      setCategoryOverride(nextCategory);
       setExtractedCharacterCount(data.characterCount || 0);
     } catch {
       setCvUploadError("Something went wrong while extracting the CV text.");
@@ -67,8 +102,10 @@ export default function SetupPage() {
   const handleGenerate = async () => {
     const cvInput = cvText.trim() || extractedCvText.trim();
 
-    if (!jobDescription.trim() && !cvInput) {
-      alert("Please paste a CV summary or a job description first.");
+    const selectedCategory = normalizeCategoryInput(categoryOverride);
+
+    if (!jobDescription.trim() && !cvInput && !selectedCategory) {
+      alert("Please choose a category, paste a CV summary, or add a job description first.");
       return;
     }
 
@@ -84,6 +121,7 @@ export default function SetupPage() {
           cvText: cvInput,
           jobDescription,
           interviewType,
+          categoryOverride: selectedCategory,
         }),
       });
 
@@ -100,6 +138,7 @@ export default function SetupPage() {
       localStorage.setItem("questions", JSON.stringify(data.questions || []));
       localStorage.setItem("questionDetails", JSON.stringify(data.questionDetails || data.questions || []));
       localStorage.setItem("inferredCategory", data.inferredCategory || "");
+      localStorage.setItem("selectedCategory", data.selectedCategory || normalizeCategoryInput(categoryOverride));
 
       router.push("/interview");
     } catch {
@@ -184,6 +223,27 @@ export default function SetupPage() {
                     </p>
                   </div>
                 ) : null}
+
+                <div className="space-y-2 rounded-3xl border border-slate-200 bg-white p-4">
+                  <label className="text-sm font-semibold text-slate-700">
+                    Category
+                  </label>
+                  <input
+                    list="job-category-options"
+                    value={categoryOverride}
+                    onChange={(e) => setCategoryOverride(e.target.value)}
+                    placeholder="Search or choose your category"
+                    className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                  />
+                  <datalist id="job-category-options">
+                    {CATEGORY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.label} />
+                    ))}
+                  </datalist>
+                  <p className="text-xs leading-5 text-slate-500">
+                    This category is always used for question selection. CV upload can suggest it, but you can override it.
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -245,7 +305,7 @@ export default function SetupPage() {
 
                   <div className="mt-4 space-y-2 text-sm text-slate-600">
                     <p><span className="font-medium text-slate-800">CV:</span> {cvFileName || "Not uploaded"}</p>
-                    <p><span className="font-medium text-slate-800">Detected Category:</span> {detectedCategory || "Not detected yet"}</p>
+                    <p><span className="font-medium text-slate-800">Category:</span> {categoryOverride || detectedCategory || "Not selected yet"}</p>
                     <p><span className="font-medium text-slate-800">Extracted CV:</span> {extractedCharacterCount ? `${extractedCharacterCount} characters ready` : "Not extracted yet"}</p>
                     <p><span className="font-medium text-slate-800">Manual Summary:</span> {cvText ? "Added" : "Not added yet"}</p>
                     <p><span className="font-medium text-slate-800">Interview Type:</span> {interviewType}</p>

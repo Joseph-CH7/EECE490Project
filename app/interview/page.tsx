@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useUser } from "@clerk/nextjs";
+import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { speak } from "@/lib/voice";
+import { db } from "@/lib/firebase";
 import {
   ArrowLeft,
   Mic,
@@ -104,7 +107,45 @@ function dedupeQuestionList(values: string[]) {
   return deduped;
 }
 
+function weightedScore(mainScore: number, followUpScore: number) {
+  return Number((mainScore * 0.7 + followUpScore * 0.3).toFixed(1));
+}
+
+function uniqueFeedbackItems(items: string[]) {
+  return [...new Set(items.filter(Boolean))].slice(0, 4);
+}
+
+function combineQuestionFeedback(
+  mainFeedback: LiveInterviewFeedback,
+  followUpFeedback: LiveInterviewFeedback,
+): LiveInterviewFeedback {
+  return {
+    ...mainFeedback,
+    totalScore: Math.round(
+      mainFeedback.totalScore * 0.7 + followUpFeedback.totalScore * 0.3,
+    ),
+    relevance: weightedScore(mainFeedback.relevance, followUpFeedback.relevance),
+    keyword: weightedScore(mainFeedback.keyword, followUpFeedback.keyword),
+    semantic: weightedScore(mainFeedback.semantic, followUpFeedback.semantic),
+    delivery: weightedScore(mainFeedback.delivery, followUpFeedback.delivery),
+    strengths: uniqueFeedbackItems([
+      ...mainFeedback.strengths,
+      ...followUpFeedback.strengths,
+    ]),
+    improvements: uniqueFeedbackItems([
+      ...followUpFeedback.improvements,
+      ...mainFeedback.improvements,
+    ]),
+    answerLength: mainFeedback.answerLength + followUpFeedback.answerLength,
+    includesExample: mainFeedback.includesExample || followUpFeedback.includesExample,
+    includesOutcome: mainFeedback.includesOutcome || followUpFeedback.includesOutcome,
+    visualPresence: mainFeedback.visualPresence,
+    visualMetrics: mainFeedback.visualMetrics,
+  };
+}
+
 export default function InterviewPage() {
+  const { user } = useUser();
   const [questions, setQuestions] = useState<string[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answer, setAnswer] = useState("");
@@ -123,6 +164,38 @@ export default function InterviewPage() {
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const askedQuestionKeysRef = useRef<Set<string>>(new Set());
   const isSubmittingRef = useRef(false);
+  const lastSavedInterviewDocIdRef = useRef<string | null>(null);
+  const visualMetricsRef = useRef<VisualMetrics | null>(null);
+  const currentSessionIdRef = useRef<string>("");
+  const currentSessionNumberRef = useRef<number>(1);
+
+  const getUserStorageKey = (key: string) =>
+    user?.id ? `${key}:${user.id}` : key;
+
+  const handleVisualMetricsChange = (metrics: VisualMetrics) => {
+    visualMetricsRef.current = metrics;
+    setVisualMetrics(metrics);
+  };
+
+  const getCurrentVisualMetrics = () => {
+    const metrics = visualMetricsRef.current || visualMetrics;
+    return metrics && metrics.sampleCount > 0 ? metrics : null;
+  };
+
+  const getNextSessionNumber = () => {
+    if (typeof window === "undefined") return 1;
+
+    const interviews = JSON.parse(localStorage.getItem(getUserStorageKey("interviews")) || "[]");
+    const savedSessionNumbers = interviews
+      .map((item: { sessionNumber?: unknown }) => Number(item.sessionNumber))
+      .filter((value: number) => Number.isFinite(value) && value > 0);
+
+    if (savedSessionNumbers.length) {
+      return Math.max(...savedSessionNumbers) + 1;
+    }
+
+    return Math.floor(interviews.length / 4) + 1;
+  };
 
   const persistSessionFeedback = (
     nextEntry: InterviewFeedbackEntry,
@@ -131,7 +204,7 @@ export default function InterviewPage() {
       return null;
     }
 
-    const savedEntries = localStorage.getItem("interviewFeedbackEntries");
+    const savedEntries = localStorage.getItem(getUserStorageKey("interviewFeedbackEntries"));
     let entries: InterviewFeedbackEntry[] = [];
 
     if (savedEntries) {
@@ -144,27 +217,149 @@ export default function InterviewPage() {
 
     const nextEntries = [...entries, nextEntry];
     const sessionFeedback = buildSessionInterviewFeedback(nextEntries);
+    const questionNumber = nextEntries.length;
 
-    localStorage.setItem("interviewFeedbackEntries", JSON.stringify(nextEntries));
+    localStorage.setItem(getUserStorageKey("interviewFeedbackEntries"), JSON.stringify(nextEntries));
 
     if (sessionFeedback) {
+  localStorage.setItem(getUserStorageKey("interviewSessionFeedback"), JSON.stringify(sessionFeedback));
   localStorage.setItem("interviewSessionFeedback", JSON.stringify(sessionFeedback));
 
   // ✅ SAVE FOR DASHBOARD
-  const interviews = JSON.parse(localStorage.getItem("interviews") || "[]");
+  const interviews = JSON.parse(localStorage.getItem(getUserStorageKey("interviews")) || "[]");
 
-  interviews.push({
+  const savedInterview = {
     question: nextEntry.question,
     answer: nextEntry.answer,
+    sessionId: currentSessionIdRef.current,
+    sessionNumber: currentSessionNumberRef.current,
+    questionNumber,
     score: nextEntry.feedback.totalScore,
     feedback: nextEntry.feedback,
     date: new Date().toISOString(),
-  });
+    userId: user?.id || "guest",
+    userEmail: user?.primaryEmailAddress?.emailAddress || "",
+  };
 
-  localStorage.setItem("interviews", JSON.stringify(interviews));
+  interviews.push(savedInterview);
 
+  localStorage.setItem(getUserStorageKey("interviews"), JSON.stringify(interviews));
+
+  localStorage.setItem(getUserStorageKey("latestInterviewFeedback"), JSON.stringify(sessionFeedback));
   localStorage.setItem("latestInterviewFeedback", JSON.stringify(sessionFeedback));
+
+  if (user?.id) {
+    addDoc(collection(db, "interviewResults"), {
+      ...savedInterview,
+      sessionFeedback,
+      interviewType,
+      category: inferredCategory,
+      createdAt: serverTimestamp(),
+    })
+      .then((docRef) => {
+        lastSavedInterviewDocIdRef.current = docRef.id;
+      })
+      .catch((error) => {
+        console.error("Error saving interview result:", error);
+      });
+  }
 }
+
+    return sessionFeedback;
+  };
+
+  const persistFollowUpAnswer = (
+    followUpQuestion: string,
+    followUpAnswer: string,
+    followUpFeedback: LiveInterviewFeedback | null,
+  ): InterviewSessionFeedback | null => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const savedEntries = localStorage.getItem(getUserStorageKey("interviewFeedbackEntries"));
+    let entries: InterviewFeedbackEntry[] = [];
+
+    if (savedEntries) {
+      try {
+        entries = JSON.parse(savedEntries) as InterviewFeedbackEntry[];
+      } catch (error) {
+        console.error("Could not parse saved interview feedback entries:", error);
+      }
+    }
+
+    if (!entries.length) {
+      return null;
+    }
+
+    const updatedEntries = [...entries];
+    const lastEntry = updatedEntries[updatedEntries.length - 1];
+
+    const combinedFeedback = followUpFeedback
+      ? combineQuestionFeedback(lastEntry.feedback, followUpFeedback)
+      : lastEntry.feedback;
+
+    updatedEntries[updatedEntries.length - 1] = {
+      ...lastEntry,
+      followUpQuestion,
+      followUpAnswer,
+      followUpFeedback: followUpFeedback || undefined,
+      feedback: combinedFeedback,
+    };
+
+    const sessionFeedback = buildSessionInterviewFeedback(updatedEntries);
+    localStorage.setItem(
+      getUserStorageKey("interviewFeedbackEntries"),
+      JSON.stringify(updatedEntries),
+    );
+
+    if (sessionFeedback) {
+      localStorage.setItem(
+        getUserStorageKey("interviewSessionFeedback"),
+        JSON.stringify(sessionFeedback),
+      );
+      localStorage.setItem("interviewSessionFeedback", JSON.stringify(sessionFeedback));
+      localStorage.setItem(
+        getUserStorageKey("latestInterviewFeedback"),
+        JSON.stringify(sessionFeedback),
+      );
+      localStorage.setItem("latestInterviewFeedback", JSON.stringify(sessionFeedback));
+    }
+
+    const savedInterviews = JSON.parse(localStorage.getItem(getUserStorageKey("interviews")) || "[]");
+
+    if (savedInterviews.length) {
+      const updatedInterviews = [...savedInterviews];
+      const lastInterview = updatedInterviews[updatedInterviews.length - 1];
+
+      updatedInterviews[updatedInterviews.length - 1] = {
+        ...lastInterview,
+        followUpQuestion,
+        followUpAnswer,
+        followUpFeedback: followUpFeedback || undefined,
+        score: combinedFeedback.totalScore,
+        feedback: combinedFeedback,
+      };
+
+      localStorage.setItem(
+        getUserStorageKey("interviews"),
+        JSON.stringify(updatedInterviews),
+      );
+    }
+
+    if (user?.id && lastSavedInterviewDocIdRef.current) {
+      updateDoc(doc(db, "interviewResults", lastSavedInterviewDocIdRef.current), {
+        followUpQuestion,
+        followUpAnswer,
+        followUpFeedback: followUpFeedback || null,
+        score: combinedFeedback.totalScore,
+        feedback: combinedFeedback,
+        sessionFeedback,
+        updatedAt: serverTimestamp(),
+      }).catch((error) => {
+        console.error("Error updating interview follow-up result:", error);
+      });
+    }
 
     return sessionFeedback;
   };
@@ -275,6 +470,8 @@ export default function InterviewPage() {
     if (!questions.length) return;
 
     finalTranscriptRef.current = "";
+    currentSessionIdRef.current = `interview-${Date.now()}`;
+    currentSessionNumberRef.current = getNextSessionNumber();
     askedQuestionKeysRef.current = new Set([normalizeQuestionKey(questions[0])]);
     setAnswer("");
     setFollowUpPrompt(null);
@@ -287,6 +484,9 @@ export default function InterviewPage() {
       localStorage.removeItem("latestInterviewFeedback");
       localStorage.removeItem("interviewFeedbackEntries");
       localStorage.removeItem("interviewSessionFeedback");
+      localStorage.removeItem(getUserStorageKey("latestInterviewFeedback"));
+      localStorage.removeItem(getUserStorageKey("interviewFeedbackEntries"));
+      localStorage.removeItem(getUserStorageKey("interviewSessionFeedback"));
     }
 
     const openingLine = `Welcome. Let's begin. ${questions[0]}`;
@@ -347,6 +547,35 @@ export default function InterviewPage() {
 
     try {
       if (followUpPrompt) {
+        let followUpFeedback: LiveInterviewFeedback | null = null;
+
+        try {
+          const followUpRes = await fetch("/api/live-interview", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              conversation: updatedConversation,
+              currentQuestion: followUpPrompt,
+              interviewType,
+              visualMetrics: getCurrentVisualMetrics(),
+            }),
+          });
+
+          if (followUpRes.ok) {
+            const followUpData = await followUpRes.json();
+            followUpFeedback =
+              (followUpData.feedback || null) as LiveInterviewFeedback | null;
+          } else {
+            console.error("Follow-up scoring failed:", await followUpRes.text());
+          }
+        } catch (error) {
+          console.error("Follow-up scoring failed:", error);
+        }
+
+        persistFollowUpAnswer(followUpPrompt, currentAnswer, followUpFeedback);
+
         finalTranscriptRef.current = "";
         setAnswer("");
         setFollowUpPrompt(null);
@@ -400,7 +629,7 @@ export default function InterviewPage() {
           conversation: updatedConversation,
           currentQuestion,
           interviewType,
-          visualMetrics,
+          visualMetrics: getCurrentVisualMetrics(),
         }),
       });
 
@@ -424,14 +653,6 @@ export default function InterviewPage() {
         data.reply || "Can you give me a more specific example?";
       const feedback = (data.feedback || null) as LiveInterviewFeedback | null;
 
-      const finalConversation: Message[] = [
-        ...updatedConversation,
-        { role: "interviewer", text: interviewerReply },
-      ];
-
-      setConversation(finalConversation);
-      setFollowUpPrompt(interviewerReply);
-
       finalTranscriptRef.current = "";
       setAnswer("");
 
@@ -451,6 +672,54 @@ export default function InterviewPage() {
           JSON.stringify(sessionFeedback || feedback),
         );
       }
+
+      if (data.noFollowUp) {
+        let nextIndex = currentQuestionIndex + 1;
+
+        while (
+          nextIndex < questions.length &&
+          askedQuestionKeysRef.current.has(normalizeQuestionKey(questions[nextIndex]))
+        ) {
+          nextIndex += 1;
+        }
+
+        if (nextIndex < questions.length) {
+          const nextQuestion = questions[nextIndex];
+          const transitionReply = `Good answer. Let's move to the next question. ${nextQuestion}`;
+          const finalConversation: Message[] = [
+            ...updatedConversation,
+            { role: "interviewer", text: transitionReply },
+          ];
+
+          askedQuestionKeysRef.current.add(normalizeQuestionKey(nextQuestion));
+          setCurrentQuestionIndex(nextIndex);
+          setConversation(finalConversation);
+          setFollowUpPrompt(null);
+          await speakText(transitionReply);
+        } else {
+          const closingReply =
+            "Nice work. That was the last question in this round. You can now review your feedback.";
+          const finalConversation: Message[] = [
+            ...updatedConversation,
+            { role: "interviewer", text: closingReply },
+          ];
+
+          setConversation(finalConversation);
+          setFollowUpPrompt(null);
+          setInterviewComplete(true);
+          await speakText(closingReply);
+        }
+
+        return;
+      }
+
+      const finalConversation: Message[] = [
+        ...updatedConversation,
+        { role: "interviewer", text: interviewerReply },
+      ];
+
+      setConversation(finalConversation);
+      setFollowUpPrompt(interviewerReply);
 
       await speakText(interviewerReply);
     } catch (error) {
@@ -567,14 +836,24 @@ export default function InterviewPage() {
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <Button
-                  className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600"
-                  onClick={startInterview}
-                  disabled={!questions.length || interviewComplete}
-                >
-                  <Mic className="mr-2 h-4 w-4" />
-                  Start Interview
-                </Button>
+                {!interviewStarted ? (
+                  <Button
+                    className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600"
+                    onClick={startInterview}
+                    disabled={!questions.length}
+                  >
+                    <Mic className="mr-2 h-4 w-4" />
+                    Start Interview
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    className="rounded-2xl"
+                    disabled
+                  >
+                    Interview Started
+                  </Button>
+                )}
 
                 <Button
                   className="rounded-2xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
@@ -615,8 +894,7 @@ export default function InterviewPage() {
                 </Button>
 
                 <Button
-                  variant="secondary"
-                  className="rounded-2xl"
+                  className="rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50"
                   onClick={submitAnswer}
                   disabled={!answer.trim() || isProcessing || interviewComplete}
                 >
@@ -672,8 +950,8 @@ export default function InterviewPage() {
 
               <div className="flex-1 rounded-[1.75rem] border border-slate-800 bg-slate-900 p-5">
                 <InterviewCameraCoach
-                  trackingActive={isListening}
-                  onMetricsChange={setVisualMetrics}
+                  trackingActive={interviewStarted && !interviewComplete}
+                  onMetricsChange={handleVisualMetricsChange}
                 />
 
                 <div className="mt-5 max-h-[260px] space-y-3 overflow-y-auto">

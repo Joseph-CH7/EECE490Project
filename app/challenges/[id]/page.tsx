@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useUser } from "@clerk/nextjs";
 import { ArrowLeft, CheckCircle, XCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,12 +29,15 @@ export default function ChallengeDetailsPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { user, isLoaded } = useUser();
   const [challenge, setChallenge] = useState<SavedChallenge | null>(null);
 
   useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem("challenges") || "[]");
+    if (!isLoaded) return;
+    const storageKey = user?.id ? `challenges:${user.id}` : "challenges";
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
     setChallenge(saved[Number(id)] || null);
-}, [id]);
+}, [id, isLoaded, user?.id]);
 
   if (!challenge) {
     return (

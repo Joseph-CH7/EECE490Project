@@ -30,6 +30,110 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function wordCount(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function containsAny(value: string, terms: string[]) {
+  return terms.some((term) => value.includes(term));
+}
+
+function answerHasExample(answer: string) {
+  const lowered = answer.toLowerCase();
+
+  return containsAny(lowered, [
+    "for example",
+    "for instance",
+    "a practical example",
+    "example is",
+    "such as",
+    "in practice",
+    "get /",
+    "post /",
+    "patch /",
+    "delete /",
+    "frontend could",
+    "backend could",
+    "banking",
+    "payment system",
+    "chat app",
+    "social media",
+  ]);
+}
+
+function answerHasLimitationOrTradeoff(answer: string) {
+  const lowered = answer.toLowerCase();
+
+  return containsAny(lowered, [
+    "limitation",
+    "tradeoff",
+    "trade-off",
+    "common mistake",
+    "drawback",
+    "less flexible",
+    "harder",
+    "multiple requests",
+    "performance",
+    "consistency",
+    "scalability",
+    "schema",
+    "migration",
+  ]);
+}
+
+function answerHasSqlAndNoSqlCases(answer: string) {
+  const lowered = answer.toLowerCase();
+  const hasSql = lowered.includes("sql");
+  const hasNoSql = lowered.includes("nosql");
+  const hasSqlCase = containsAny(lowered, [
+    "banking",
+    "payment",
+    "transaction",
+    "account",
+    "orders",
+    "reservation",
+  ]);
+  const hasNoSqlCase = containsAny(lowered, [
+    "chat",
+    "social media",
+    "feed",
+    "document",
+    "key-value",
+    "large",
+    "scale",
+    "many users",
+  ]);
+
+  return hasSql && hasNoSql && hasSqlCase && hasNoSqlCase;
+}
+
+function shouldSkipFollowUp(
+  answer: string,
+  currentQuestion: string,
+  feedback: LiveInterviewFeedback,
+) {
+  const words = wordCount(answer);
+
+  if (words < 35 || feedback.totalScore < 78) {
+    return false;
+  }
+
+  if (hasSqlNoSqlPrompt(currentQuestion)) {
+    return answerHasSqlAndNoSqlCases(answer) && answerHasLimitationOrTradeoff(answer);
+  }
+
+  if (isConceptPrompt(currentQuestion)) {
+    return answerHasExample(answer) && answerHasLimitationOrTradeoff(answer);
+  }
+
+  return (
+    words >= 75 &&
+    feedback.includesExample &&
+    feedback.includesOutcome &&
+    feedback.totalScore >= 82
+  );
+}
+
 function extractJsonObject(text: string) {
   const cleaned = text
     .replace(/^```json\s*/i, "")
@@ -87,6 +191,33 @@ function looksGenericFollowUp(followUp: string) {
   ].some((phrase) => lowered.includes(phrase));
 }
 
+function isConceptPrompt(question: string) {
+  const lowered = question.toLowerCase();
+
+  return (
+    lowered.startsWith("what is") ||
+    lowered.startsWith("define") ||
+    lowered.startsWith("explain the use") ||
+    lowered.startsWith("explain how") ||
+    lowered.includes("difference between") ||
+    lowered.includes("differences between") ||
+    lowered.includes("compare")
+  );
+}
+
+function hasSqlNoSqlPrompt(question: string) {
+  const lowered = question.toLowerCase();
+  return lowered.includes("sql") && lowered.includes("nosql");
+}
+
+function sqlNoSqlFollowUp() {
+  return "Good. Can you give one specific case where SQL is the better choice and one specific case where NoSQL is the better choice?";
+}
+
+function hasClosurePrompt(question: string) {
+  return question.toLowerCase().includes("closure");
+}
+
 function tokenize(value: string) {
   return value
     .toLowerCase()
@@ -141,22 +272,60 @@ function isValidModelFollowUp(
     return false;
   }
 
+  const loweredFollowUp = followUp.toLowerCase();
+  const normalizedFocusKeyword = focusKeyword.toLowerCase();
+  const conceptPrompt = isConceptPrompt(currentQuestion);
+  const broadConceptWords = new Set([
+    "data",
+    "database",
+    "system",
+    "application",
+    "project",
+    "choice",
+    "approach",
+  ]);
+
+  if (conceptPrompt && broadConceptWords.has(normalizedFocusKeyword)) {
+    return false;
+  }
+
+  if (
+    hasSqlNoSqlPrompt(currentQuestion) &&
+    !(loweredFollowUp.includes("sql") || loweredFollowUp.includes("nosql"))
+  ) {
+    return false;
+  }
+
+  if (
+    hasClosurePrompt(currentQuestion) &&
+    !["closure", "scope", "state", "outer function", "lexical"].some((term) =>
+      loweredFollowUp.includes(term),
+    )
+  ) {
+    return false;
+  }
+
   if (similarityScore(followUp, currentQuestion) > 0.72) {
     return false;
   }
 
-  if (!groundedKeywords.length) {
+  const relevantGroundedKeywords = conceptPrompt
+    ? groundedKeywords.filter(
+        (keyword) => !broadConceptWords.has(keyword.toLowerCase()),
+      )
+    : groundedKeywords;
+
+  if (!relevantGroundedKeywords.length) {
     return true;
   }
 
-  const normalizedFocusKeyword = focusKeyword.toLowerCase();
-  const focusKeywordIsGrounded = groundedKeywords.some(
+  const focusKeywordIsGrounded = relevantGroundedKeywords.some(
     (keyword) => keyword.toLowerCase() === normalizedFocusKeyword,
   );
 
   return (
-    (focusKeywordIsGrounded && followUp.toLowerCase().includes(normalizedFocusKeyword)) ||
-    followUpUsesAnswerKeyword(followUp, groundedKeywords)
+    (focusKeywordIsGrounded && loweredFollowUp.includes(normalizedFocusKeyword)) ||
+    followUpUsesAnswerKeyword(followUp, relevantGroundedKeywords)
   );
 }
 
@@ -240,11 +409,23 @@ Scoring guidance:
   const semantic = scoreFromModel(parsed.semantic, baselineFeedback.semantic);
   const delivery = scoreFromModel(parsed.delivery, baselineFeedback.delivery);
   const visualPresence = baselineFeedback.visualPresence;
+  const visualScore = visualPresence ?? 6.2;
 
-  const totalScore = Math.round(
-    ((relevance + keyword + semantic) / 3) * 7 +
-      ((delivery + visualPresence) / 2) * 3,
+  const modelTotalScore = Math.round(
+    ((relevance + keyword + semantic) / 3) * 8.5 +
+      ((delivery + visualScore) / 2) * 1.5,
   );
+  const answerWords = wordCount(answer);
+  let totalScore = Math.max(
+    modelTotalScore,
+    baselineFeedback.totalScore,
+  );
+
+  if (answerWords < 8) {
+    totalScore = Math.min(totalScore, 35);
+  } else if (answerWords < 15) {
+    totalScore = Math.min(totalScore, 50);
+  }
 
   const localFollowUp = buildCoachingReply(answer, currentQuestion, interviewType);
   const modelFollowUp = normalizeText(parsed.followUp);
@@ -253,6 +434,11 @@ Scoring guidance:
     isValidModelFollowUp(modelFollowUp, focusKeyword, currentQuestion, groundedKeywords)
       ? modelFollowUp
       : localFollowUp;
+  const finalFollowUp =
+    hasSqlNoSqlPrompt(currentQuestion) &&
+    !(followUp.toLowerCase().includes("sql") || followUp.toLowerCase().includes("nosql"))
+      ? sqlNoSqlFollowUp()
+      : followUp;
 
   const feedback: LiveInterviewFeedback = {
     ...baselineFeedback,
@@ -263,11 +449,11 @@ Scoring guidance:
     delivery,
     strengths: listFromModel(parsed.strengths, baselineFeedback.strengths),
     improvements: listFromModel(parsed.improvements, baselineFeedback.improvements),
-    followUp,
+    followUp: finalFollowUp,
   };
 
   return {
-    reply: followUp,
+    reply: finalFollowUp,
     feedback,
   };
 }
@@ -318,10 +504,12 @@ export async function POST(req: Request) {
     const reply =
       aiFeedback?.reply ||
       buildCoachingReply(answer, currentQuestion, interviewType);
+    const noFollowUp = shouldSkipFollowUp(answer, currentQuestion, feedback);
 
     return Response.json({
-      reply,
+      reply: noFollowUp ? "" : reply,
       feedback,
+      noFollowUp,
     });
   } catch (error) {
     console.error("Live interview route error:", error);

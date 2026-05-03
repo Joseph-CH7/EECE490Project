@@ -13,7 +13,7 @@ export type LiveInterviewFeedback = {
   keyword: number;
   semantic: number;
   delivery: number;
-  visualPresence: number;
+  visualPresence: number | null;
   strengths: string[];
   improvements: string[];
   followUp: string;
@@ -26,6 +26,9 @@ export type LiveInterviewFeedback = {
 export type InterviewFeedbackEntry = {
   question: string;
   answer: string;
+  followUpQuestion?: string;
+  followUpAnswer?: string;
+  followUpFeedback?: LiveInterviewFeedback;
   feedback: LiveInterviewFeedback;
 };
 
@@ -35,7 +38,7 @@ export type InterviewSessionFeedback = {
   keyword: number;
   semantic: number;
   delivery: number;
-  visualPresence: number;
+  visualPresence: number | null;
   strengths: string[];
   improvements: string[];
   followUp: string;
@@ -71,10 +74,27 @@ function mentionsExample(text: string) {
   return [
     "for example",
     "for instance",
+    "a practical example",
+    "practical example",
+    "an example",
+    "example is",
+    "such as",
+    "like a",
+    "like an",
     "in one project",
+    "in a project",
+    "in one case",
+    "in practice",
     "i worked on",
     "i built",
     "i used",
+    "we used",
+    "the frontend could",
+    "the backend could",
+    "get /",
+    "post /",
+    "patch /",
+    "delete /",
     "my role",
   ].some((phrase) => lowered.includes(phrase));
 }
@@ -85,12 +105,25 @@ function mentionsOutcome(text: string) {
     "result",
     "outcome",
     "impact",
+    "user impact",
+    "measurable",
     "improved",
+    "improvement",
     "reduced",
     "increased",
     "faster",
     "saved",
     "delivered",
+    "became",
+    "easier",
+    "more reliable",
+    "more scalable",
+    "more maintainable",
+    "noticeably",
+    "because of that",
+    "as a result",
+    "this helped",
+    "this made",
   ].some((phrase) => lowered.includes(phrase));
 }
 
@@ -434,6 +467,8 @@ export function extractQuestionFocusConcept(question: string) {
     "encryption",
     "cache",
     "caching",
+    "closure",
+    "lexical scope",
     "api",
     "react",
     "javascript",
@@ -543,6 +578,11 @@ function isConceptQuestion(question: string) {
   );
 }
 
+function isSqlNoSqlQuestion(question: string) {
+  const lowered = question.toLowerCase();
+  return lowered.includes("sql") && lowered.includes("nosql");
+}
+
 function hasConceptContrast(answer: string) {
   const lowered = answer.toLowerCase();
   return containsAny(lowered, [
@@ -574,8 +614,12 @@ function buildTechnicalFollowUp(
       return "You explained normalization. Can you give a small example of moving data from an unnormalized table into first or second normal form, and what redundancy that removes?";
     }
 
-    if (loweredQuestion.includes("java") && loweredQuestion.includes("javascript")) {
+    if (/\bjava\b/.test(loweredQuestion) && /\bjavascript\b/.test(loweredQuestion)) {
       return "Good start. Can you give one practical example of where Java is commonly used and one example of where JavaScript is commonly used?";
+    }
+
+    if (questionConcept?.includes("closure")) {
+      return "Good. Can you give a small JavaScript example where a closure preserves state between function calls?";
     }
 
     if (loweredQuestion.includes("this") && loweredQuestion.includes("javascript")) {
@@ -709,6 +753,10 @@ function buildKeywordAwareFollowUp(
     return `You mentioned ${keyword}. What contract or endpoint mattered most, and how would you handle errors or version changes?`;
   }
 
+  if (isSqlNoSqlQuestion(currentQuestion)) {
+    return "Good. Can you give one specific case where SQL is the better choice and one specific case where NoSQL is the better choice?";
+  }
+
   if (containsAny(loweredKeyword, ["sql", "postgres", "mysql", "mongodb", "nosql", "database"])) {
     return `You mentioned ${keyword}. How did that affect your data model, and what consistency or performance tradeoff did you consider?`;
   }
@@ -747,6 +795,10 @@ export function buildCoachingReply(
   const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
   const conceptQuestion = isConceptQuestion(currentQuestion);
   const answerKeywords = extractCandidateKeywords(answer);
+
+  if (isSqlNoSqlQuestion(currentQuestion) && words >= 12) {
+    return "Good. Can you give one specific case where SQL is the better choice and one specific case where NoSQL is the better choice?";
+  }
 
   if (words < 12) {
     if (conceptQuestion) {
@@ -850,6 +902,7 @@ export function buildInterviewFeedback(
   const signals = getAnswerSignals(answer);
   const conceptQuestion = isConceptQuestion(currentQuestion);
   const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
+  const hasVisualMetrics = Boolean(visualMetrics && visualMetrics.sampleCount > 0);
 
   const relevance = clamp(
     conceptQuestion
@@ -895,7 +948,7 @@ export function buildInterviewFeedback(
   );
 
   const delivery = clamp(
-    visualMetrics
+    hasVisualMetrics && visualMetrics
       ? 3 +
           visualMetrics.averageEyeContactScore / 20 +
           visualMetrics.steadyRatio * 2
@@ -905,7 +958,7 @@ export function buildInterviewFeedback(
   );
 
   const visualPresence = clamp(
-    visualMetrics
+    hasVisualMetrics && visualMetrics
       ? 2 +
           visualMetrics.faceDetectedRatio * 3 +
           visualMetrics.centeredFaceRatio * 2.5 +
@@ -917,8 +970,8 @@ export function buildInterviewFeedback(
   );
 
   let totalScore = Math.round(
-    ((relevance + keyword + semantic) / 3) * 7 +
-      ((delivery + visualPresence) / 2) * 3,
+    ((relevance + keyword + semantic) / 3) * 8.5 +
+      ((delivery + visualPresence) / 2) * 1.5,
   );
 
   if (words < 8) {
@@ -944,7 +997,7 @@ export function buildInterviewFeedback(
 
   if (hasOutcome) {
     strengths.push("You referenced the outcome or impact, which makes your answer more convincing.");
-  } else {
+  } else if (!conceptQuestion) {
     improvements.push("Finish with a measurable result so the interviewer can judge the impact of your work.");
   }
 
@@ -954,7 +1007,7 @@ export function buildInterviewFeedback(
     improvements.push("Add a bit more structure: situation, action, and result in separate clear steps.");
   }
 
-  if (visualMetrics) {
+  if (hasVisualMetrics && visualMetrics) {
     if (visualMetrics.centeredFaceRatio >= 0.7 && visualMetrics.averageEyeContactScore >= 70) {
       strengths.push("Your camera presence was steady and you maintained strong eye contact for most of the answer.");
     } else {
@@ -968,8 +1021,6 @@ export function buildInterviewFeedback(
     if (visualMetrics.steadyRatio < 0.55) {
       improvements.push("Reduce extra head movement to appear calmer and more confident on camera.");
     }
-  } else {
-    improvements.push("Enable the camera during practice so feedback can include eye contact and on-camera presence.");
   }
 
   return {
@@ -978,14 +1029,14 @@ export function buildInterviewFeedback(
     keyword: Number(keyword.toFixed(1)),
     semantic: Number(semantic.toFixed(1)),
     delivery: Number(delivery.toFixed(1)),
-    visualPresence: Number(visualPresence.toFixed(1)),
+    visualPresence: hasVisualMetrics ? Number(visualPresence.toFixed(1)) : null,
     strengths: strengths.slice(0, 4),
     improvements: improvements.slice(0, 4),
     followUp: buildCoachingReply(answer, currentQuestion, interviewType),
     answerLength: words,
     includesExample: hasExample,
     includesOutcome: hasOutcome,
-    visualMetrics,
+    visualMetrics: hasVisualMetrics ? visualMetrics : null,
   };
 }
 
@@ -997,7 +1048,7 @@ export function buildSessionInterviewFeedback(
   }
 
   const sum = <K extends keyof LiveInterviewFeedback>(key: K) =>
-    entries.reduce((total, entry) => total + (entry.feedback[key] as number), 0);
+    entries.reduce((total, entry) => total + (Number(entry.feedback[key]) || 0), 0);
 
   const average = (value: number) => Number((value / entries.length).toFixed(1));
 
@@ -1014,15 +1065,12 @@ export function buildSessionInterviewFeedback(
     }
   }
 
-  const topItems = (items: Map<string, number>) =>
-    [...items.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4)
-      .map(([text]) => text);
-
   const visualEntries = entries
     .map((entry) => entry.feedback.visualMetrics)
-    .filter((metric): metric is VisualMetrics => Boolean(metric));
+    .filter(
+      (metric): metric is VisualMetrics =>
+        Boolean(metric && metric.sampleCount > 0),
+    );
 
   const averagedVisualMetrics = visualEntries.length
     ? {
@@ -1077,15 +1125,79 @@ export function buildSessionInterviewFeedback(
     ).toFixed(2),
   );
 
+  const topItems = (items: Map<string, number>) =>
+    [...items.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([text]) => text);
+
+  const strengths = topItems(strengthsByCount);
+  const rawImprovements = topItems(improvementsByCount);
+  const filteredImprovements = rawImprovements.filter((item) => {
+    const lowered = item.toLowerCase();
+
+    if (includesExampleRate >= 0.5 && lowered.includes("example")) {
+      return false;
+    }
+
+    if (
+      includesOutcomeRate >= 0.5 &&
+      (lowered.includes("measurable result") ||
+        lowered.includes("outcome") ||
+        lowered.includes("impact"))
+    ) {
+      return false;
+    }
+
+    if (
+      averageAnswerLength >= 45 &&
+      (lowered.includes("more structure") ||
+        lowered.includes("situation, action, and result") ||
+        lowered.includes("separate clear steps"))
+    ) {
+      return false;
+    }
+
+    if (
+      strengths.some((strength) => strength.toLowerCase().includes("concept")) &&
+      lowered.includes("clearer definition")
+    ) {
+      return false;
+    }
+
+    if (
+      strengths.some((strength) => strength.toLowerCase().includes("concrete example")) &&
+      lowered.includes("specific situation")
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const improvements = filteredImprovements.length
+    ? filteredImprovements
+    : rawImprovements.filter(
+        (item) =>
+          !strengths.some((strength) => {
+            const loweredStrength = strength.toLowerCase();
+            const loweredItem = item.toLowerCase();
+            return (
+              (loweredStrength.includes("example") && loweredItem.includes("example")) ||
+              (loweredStrength.includes("outcome") && loweredItem.includes("outcome")) ||
+              (loweredStrength.includes("structure") && loweredItem.includes("structure"))
+            );
+          }),
+      );
+
   return {
     totalScore: Math.round(sum("totalScore") / entries.length),
     relevance: average(sum("relevance")),
     keyword: average(sum("keyword")),
     semantic: average(sum("semantic")),
     delivery: average(sum("delivery")),
-    visualPresence: average(sum("visualPresence")),
-    strengths: topItems(strengthsByCount),
-    improvements: topItems(improvementsByCount),
+    visualPresence: averagedVisualMetrics ? average(sum("visualPresence")) : null,
+    strengths: strengths.slice(0, 4),
+    improvements: improvements.slice(0, 4),
     followUp:
       "Across the interview, which answer would you improve first, and how would you make it more specific, measurable, or better structured?",
     answerCount: entries.length,

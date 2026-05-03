@@ -6,6 +6,7 @@ type GenerateQuestionsInput = {
   cvText?: string;
   jobDescription?: string;
   interviewType?: string;
+  categoryOverride?: string;
 };
 
 type QuestionDetail = {

@@ -1,10 +1,10 @@
 # Real-Time Interview Simulator
 
-Real-Time Interview Simulator is a web application for practicing interviews, completing role-based challenges, and receiving structured AI/ML-assisted feedback.
+Real-Time Interview Simulator is a web application for practicing interviews, completing role-based challenges, and receiving structured feedback.
 
 The app helps students, graduates, and job seekers prepare for real interviews by giving them a place to practice answers, review scores, and track improvement over time.
 
-The system uses Clerk for authentication, Firebase/Firestore for storing user results, and an AI/ML-assisted scoring pipeline for feedback generation.
+The system uses Clerk for authentication, Firebase/Firestore for storing user results, and a hybrid scoring pipeline for feedback generation.
 
 ---
 
@@ -23,7 +23,7 @@ The evaluation focuses on:
 - expected key points
 - overall answer quality
 
-The system uses a rule-based baseline and an AI/ML-assisted scoring approach to evaluate answers and generate useful feedback.
+The system uses a rule-based baseline, trained local models, and a semantic evaluation layer to evaluate answers and generate useful feedback.
 
 ---
 
@@ -41,7 +41,7 @@ You also need environment variables for:
 
 - Clerk authentication
 - Firebase/Firestore storage
-- Gemini API feedback and scoring
+- feedback API access for semantic answer evaluation
 
 ---
 
@@ -77,7 +77,7 @@ Add the required environment variables inside `.env.local`:
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key_here
 CLERK_SECRET_KEY=your_clerk_secret_key_here
 
-# Gemini API
+# Feedback API
 GEMINI_API_KEY=your_gemini_api_key_here
 
 # Firebase
@@ -93,7 +93,7 @@ Important:
 
 - Clerk keys are required for sign-in, sign-up, and user sessions.
 - Firebase keys are required for storing and retrieving saved results.
-- The Gemini API key is required for AI-assisted feedback and scoring.
+- The feedback API key is required for semantic answer evaluation.
 - Without valid environment variables, authentication, saved results, or AI feedback may not work correctly.
 
 ---
@@ -224,7 +224,7 @@ This allows users to return to the dashboard and review previous attempts instea
 
 ## Machine learning approach
 
-The machine learning task is to evaluate the quality of a user’s answer.
+The machine learning task is to support interview preparation through resume category prediction, question type classification, role-aware question selection, and answer feedback.
 
 The system can treat this as:
 
@@ -233,7 +233,7 @@ The system can treat this as:
 The model predicts a numerical score from 0 to 100.
 
 ```txt
-User answer -> Predicted score
+User answer -> feedback score
 ```
 
 ### Classification
@@ -276,7 +276,7 @@ The baseline checks:
 - basic structure
 - completeness indicators
 
-The AI/ML-assisted scoring pipeline improves on this by evaluating the full answer and generating structured feedback.
+The hybrid scoring pipeline improves on this by evaluating the full answer and generating structured feedback.
 
 
 Possible model approaches include:
@@ -307,6 +307,8 @@ This analysis helps identify where the system needs more labeled data, better fe
 ## Responsible ML
 
 This project gives feedback that may influence how users judge their interview readiness, so responsible ML is important.
+
+More detail is available in [docs/RESPONSIBLE_ML.md](docs/RESPONSIBLE_ML.md).
 
 ### Explainability
 
@@ -341,6 +343,15 @@ The project has some limitations:
 - authentication depends on valid Clerk configuration
 - saved results depend on valid Firebase/Firestore configuration
 - feedback may not always match expert human judgment
+
+---
+
+## Project documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Results and evidence](docs/RESULTS.md)
+- [Responsible ML](docs/RESPONSIBLE_ML.md)
+- [Demo script](docs/DEMO_SCRIPT.md)
 
 ---
 

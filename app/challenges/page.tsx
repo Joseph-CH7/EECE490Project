@@ -548,12 +548,17 @@ useEffect(() => {
   return () => clearInterval(timer);
 }, [activeChallenge, submitted, timeLeft]);
 async function saveChallengeResult(savedChallenge: any) {
-  // Keep localStorage so dashboard can still work locally
-  const oldChallenges = JSON.parse(localStorage.getItem("challenges") || "[]");
+  const challengeToSave = {
+    ...savedChallenge,
+    userId: user?.id || "guest",
+    userEmail: user?.primaryEmailAddress?.emailAddress || "",
+  };
+  const storageKey = user?.id ? `challenges:${user.id}` : "challenges";
+  const oldChallenges = JSON.parse(localStorage.getItem(storageKey) || "[]");
 
   localStorage.setItem(
-    "challenges",
-    JSON.stringify([savedChallenge, ...oldChallenges])
+    storageKey,
+    JSON.stringify([challengeToSave, ...oldChallenges])
   );
 
   // Also save to Firebase for real dashboard persistence
@@ -561,7 +566,7 @@ async function saveChallengeResult(savedChallenge: any) {
 
   try {
   const resultToSave = removeUndefined({
-    ...savedChallenge,
+    ...challengeToSave,
 
     qualitySimilarity: savedChallenge?.qualitySimilarity ?? 0,
     relevanceSimilarity: savedChallenge?.relevanceSimilarity ?? 0,
@@ -571,8 +576,6 @@ async function saveChallengeResult(savedChallenge: any) {
     score: savedChallenge?.score ?? 0,
     feedback: savedChallenge?.feedback ?? "No feedback generated.",
 
-    userId: user?.id ?? "guest",
-    userEmail: user?.primaryEmailAddress?.emailAddress ?? "",
     createdAt: serverTimestamp(),
   });
 
@@ -632,7 +635,13 @@ async function saveChallengeResult(savedChallenge: any) {
     setIsEvaluating(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/score", {
+      const mlServiceUrl = process.env.NEXT_PUBLIC_CHALLENGE_ML_SERVICE_URL;
+
+      if (!mlServiceUrl) {
+        throw new Error("Local challenge ML service is not configured.");
+      }
+
+      const response = await fetch(`${mlServiceUrl.replace(/\/$/, "")}/score`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -688,8 +697,7 @@ async function saveChallengeResult(savedChallenge: any) {
       setSubmitted(true);
 
       saveChallengeResult(savedChallenge);
-    } catch (error) {
-      console.error("ML service unavailable. Using fallback evaluator:", error);
+    } catch {
 
       const fallbackResult = evaluateAnswer(answer, activeChallenge);
 
@@ -831,7 +839,7 @@ saveChallengeResult(savedChallenge);
               <div className="mt-4">
                 <h3 className="font-semibold mb-2">Options</h3>
                 <ul className="space-y-2">
-                  {activeChallenge.options.map((option, index) => (
+                  {activeChallenge.options.map((option: string, index: number) => (
                     <li
                       key={index}
                       className="p-3 border rounded-lg bg-slate-50"

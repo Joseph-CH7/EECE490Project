@@ -23,6 +23,8 @@ export default function InterviewCameraCoach({
   const [eyeContactScore, setEyeContactScore] = useState(0);
 
   const previousCenterRef = useRef<{ x: number; y: number } | null>(null);
+  const frameCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previousFrameRef = useRef<Uint8ClampedArray | null>(null);
   const movementHistoryRef = useRef<number[]>([]);
   const eyeSamplesRef = useRef<number[]>([]);
   const recentEyeScoresRef = useRef<number[]>([]);
@@ -78,14 +80,9 @@ export default function InterviewCameraCoach({
     awaySampleCountRef.current = 0;
     noFaceSampleCountRef.current = 0;
     highMovementSampleCountRef.current = 0;
+    previousFrameRef.current = null;
     emitMetrics();
   }, [emitMetrics]);
-
-  useEffect(() => {
-    if (!trackingActive) {
-      resetMetrics();
-    }
-  }, [resetMetrics, trackingActive]);
 
   useEffect(() => {
     async function startCameraAndTracking() {
@@ -112,6 +109,43 @@ export default function InterviewCameraCoach({
           const video = videoRef.current;
           if (!video) return;
           if (video.readyState < 2) return;
+          const shouldCollectMetrics = true;
+
+          if (shouldCollectMetrics) {
+            sampleCountRef.current += 1;
+          }
+
+          let frameMotion = 0;
+          try {
+            const canvas =
+              frameCanvasRef.current ||
+              document.createElement("canvas");
+            frameCanvasRef.current = canvas;
+            canvas.width = 32;
+            canvas.height = 24;
+
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            if (context) {
+              context.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const frame = context.getImageData(0, 0, canvas.width, canvas.height).data;
+              const previousFrame = previousFrameRef.current;
+
+              if (previousFrame && previousFrame.length === frame.length) {
+                let totalDiff = 0;
+                for (let i = 0; i < frame.length; i += 16) {
+                  totalDiff +=
+                    Math.abs(frame[i] - previousFrame[i]) +
+                    Math.abs(frame[i + 1] - previousFrame[i + 1]) +
+                    Math.abs(frame[i + 2] - previousFrame[i + 2]);
+                }
+                frameMotion = totalDiff / (frame.length / 16) / 255 / 3;
+              }
+
+              previousFrameRef.current = new Uint8ClampedArray(frame);
+            }
+          } catch (error) {
+            console.error("Frame motion check failed:", error);
+          }
 
           const detection = await faceapi.detectSingleFace(
             video,
@@ -119,10 +153,6 @@ export default function InterviewCameraCoach({
           );
 
           if (videoRef.current !== video) return;
-
-          if (trackingActiveRef.current) {
-            sampleCountRef.current += 1;
-          }
 
           if (!detection) {
             noFaceSampleCountRef.current += 1;
@@ -133,7 +163,14 @@ export default function InterviewCameraCoach({
                 ? "Face: Turned away or out of frame"
                 : "Face: No face detected",
             );
-            setMovementText("Movement: Cannot measure");
+            if (shouldCollectMetrics && (sustainedNoFace || frameMotion > 0.08)) {
+              setMovementText("Movement: Too much movement");
+              if (frameMotion > 0.08) {
+                highMovementSampleCountRef.current += 1;
+              }
+            } else {
+              setMovementText("Movement: Cannot measure");
+            }
             setEyeContactText(
               sustainedNoFace
                 ? "Eye contact: Looking away"
@@ -143,8 +180,10 @@ export default function InterviewCameraCoach({
             movementHistoryRef.current = [];
             recentEyeScoresRef.current = [];
             awaySampleCountRef.current = 0;
-            highMovementSampleCountRef.current = 0;
-            if (trackingActiveRef.current) {
+            highMovementSampleCountRef.current = sustainedNoFace
+              ? highMovementSampleCountRef.current + 1
+              : 0;
+            if (shouldCollectMetrics) {
               lookingAwaySamplesRef.current += 1;
               emitMetrics();
             }
@@ -153,7 +192,7 @@ export default function InterviewCameraCoach({
 
           setFaceText("Face: Detected");
           noFaceSampleCountRef.current = 0;
-          if (trackingActiveRef.current) {
+          if (shouldCollectMetrics) {
             detectedSamplesRef.current += 1;
           }
 
@@ -201,17 +240,17 @@ export default function InterviewCameraCoach({
 
           if (sustainedLookingAway) {
             currentEyeScore = 20;
-            if (trackingActiveRef.current) {
+            if (shouldCollectMetrics) {
               lookingAwaySamplesRef.current += 1;
             }
           } else if (combinedOffset < 0.2) {
             currentEyeScore = 100;
-            if (trackingActiveRef.current) {
+            if (shouldCollectMetrics) {
               centeredSamplesRef.current += 1;
             }
           } else if (combinedOffset < 0.3) {
             currentEyeScore = 75;
-            if (trackingActiveRef.current) {
+            if (shouldCollectMetrics) {
               centeredSamplesRef.current += 1;
             }
           } else {
@@ -252,39 +291,34 @@ export default function InterviewCameraCoach({
             const dy = faceCenter.y - previousCenterRef.current.y;
             const normalizedDist =
               Math.sqrt(dx * dx + dy * dy) / Math.max(box.width, box.height, 1);
+            const movementScore = Math.max(normalizedDist, frameMotion * 1.8);
 
-            movementHistoryRef.current.push(normalizedDist);
+            movementHistoryRef.current.push(movementScore);
 
-            if (movementHistoryRef.current.length > 8) {
+            if (movementHistoryRef.current.length > 4) {
               movementHistoryRef.current.shift();
             }
 
-            const sortedMovement = [...movementHistoryRef.current].sort((a, b) => a - b);
-            const trimCount = Math.floor(sortedMovement.length * 0.15);
-            const trimmedMovement = sortedMovement.slice(
-              trimCount,
-              sortedMovement.length - trimCount || sortedMovement.length,
-            );
             const avgMovement =
-              trimmedMovement.reduce((a, b) => a + b, 0) /
-              Math.max(trimmedMovement.length, 1);
+              movementHistoryRef.current.reduce((a, b) => a + b, 0) /
+              Math.max(movementHistoryRef.current.length, 1);
 
-            if (avgMovement < 0.025) {
+            if (avgMovement < 0.018) {
               highMovementSampleCountRef.current = 0;
               setMovementText("Movement: Very steady");
-              if (trackingActiveRef.current) {
+              if (shouldCollectMetrics) {
                 steadySamplesRef.current += 1;
               }
-            } else if (avgMovement < 0.07) {
+            } else if (avgMovement < 0.045) {
               highMovementSampleCountRef.current = 0;
               setMovementText("Movement: Normal");
-              if (trackingActiveRef.current) {
+              if (shouldCollectMetrics) {
                 steadySamplesRef.current += 1;
               }
             } else {
               highMovementSampleCountRef.current += 1;
               setMovementText(
-                highMovementSampleCountRef.current >= 2
+                highMovementSampleCountRef.current >= 1
                   ? "Movement: Too much movement"
                   : "Movement: Normal",
               );
@@ -292,7 +326,7 @@ export default function InterviewCameraCoach({
           }
 
           previousCenterRef.current = faceCenter;
-          if (trackingActiveRef.current) {
+          if (shouldCollectMetrics) {
             emitMetrics();
           }
         }, 500);
@@ -320,6 +354,7 @@ export default function InterviewCameraCoach({
       previousCenterRef.current = null;
       movementHistoryRef.current = [];
       recentEyeScoresRef.current = [];
+      previousFrameRef.current = null;
       awaySampleCountRef.current = 0;
       noFaceSampleCountRef.current = 0;
       highMovementSampleCountRef.current = 0;

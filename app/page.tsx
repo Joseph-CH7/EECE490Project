@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Sparkles,
@@ -29,8 +30,102 @@ import {
   useUser,
 } from "@clerk/nextjs";
 
+type SavedAttempt = {
+  score?: number | string;
+  date?: string;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getDateValue(date?: string) {
+  if (!date) return 0;
+  const parsed = new Date(date).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getHomeDashboardPreview(interviews: SavedAttempt[], challenges: SavedAttempt[]) {
+  const attempts = [...interviews, ...challenges]
+    .map((attempt) => ({
+      score: Number(attempt.score),
+      date: attempt.date,
+    }))
+    .filter((attempt) => Number.isFinite(attempt.score))
+    .sort((a, b) => getDateValue(a.date) - getDateValue(b.date));
+
+  if (!attempts.length) {
+    return {
+      readiness: "Start Practicing",
+      scoreLabel: "—",
+      scoreValue: 0,
+      trend: "No trend yet",
+      recommendation: "Complete your first interview or challenge to unlock progress insights.",
+      attempts: 0,
+    };
+  }
+
+  const scores = attempts.map((attempt) => attempt.score);
+  const averageScore = Math.round(
+    scores.reduce((total, score) => total + score, 0) / scores.length,
+  );
+  const midpoint = Math.max(1, Math.floor(attempts.length / 2));
+  const olderScores = attempts.slice(0, midpoint).map((attempt) => attempt.score);
+  const recentScores = attempts.slice(midpoint).map((attempt) => attempt.score);
+  const olderAverage = olderScores.length
+    ? olderScores.reduce((total, score) => total + score, 0) / olderScores.length
+    : averageScore;
+  const recentAverage = recentScores.length
+    ? recentScores.reduce((total, score) => total + score, 0) / recentScores.length
+    : averageScore;
+  const trendChange = Math.round(recentAverage - olderAverage);
+
+  let readiness = "Needs Practice";
+  if (averageScore >= 88) readiness = "Strong Candidate";
+  else if (averageScore >= 78) readiness = "Interview Ready";
+  else if (averageScore >= 62) readiness = "Almost Ready";
+
+  let trend = "Stable";
+  if (attempts.length < 2) trend = "Not enough attempts";
+  else if (trendChange >= 8) trend = "Strongly Improving";
+  else if (trendChange >= 3) trend = "Improving";
+  else if (trendChange <= -8) trend = "Dropping";
+  else if (trendChange <= -3) trend = "Needs Consistency";
+
+  return {
+    readiness,
+    scoreLabel: `${averageScore}/100`,
+    scoreValue: clamp(averageScore, 0, 100),
+    trend,
+    recommendation:
+      averageScore >= 78
+        ? "Keep practicing with harder technical and behavioral questions."
+        : "Practice clearer structure, stronger examples, and complete reasoning.",
+    attempts: attempts.length,
+  };
+}
+
 export default function HomePage() {
   const { isSignedIn, user } = useUser();
+  const [interviews, setInterviews] = useState<SavedAttempt[]>([]);
+  const [challenges, setChallenges] = useState<SavedAttempt[]>([]);
+
+  useEffect(() => {
+    try {
+      const interviewKey = user?.id ? `interviews:${user.id}` : "interviews";
+      const challengeKey = user?.id ? `challenges:${user.id}` : "challenges";
+      setInterviews(JSON.parse(localStorage.getItem(interviewKey) || "[]"));
+      setChallenges(JSON.parse(localStorage.getItem(challengeKey) || "[]"));
+    } catch {
+      setInterviews([]);
+      setChallenges([]);
+    }
+  }, [user?.id]);
+
+  const dashboardPreview = useMemo(
+    () => getHomeDashboardPreview(interviews, challenges),
+    [interviews, challenges],
+  );
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#f7f9fc] text-slate-900">
@@ -531,29 +626,35 @@ export default function HomePage() {
 
             <div className="mt-7 rounded-[2rem] border border-white/10 bg-white/5 p-5">
               <p className="text-sm text-slate-400">Interview Readiness</p>
-              <p className="mt-2 text-4xl font-black">Almost Ready</p>
+              <p className="mt-2 text-4xl font-black">{dashboardPreview.readiness}</p>
 
               <div className="mt-5 h-2 rounded-full bg-white/10">
-                <div className="h-2 w-[72%] rounded-full bg-emerald-400" />
+                <div
+                  className="h-2 rounded-full bg-emerald-400"
+                  style={{ width: `${dashboardPreview.scoreValue}%` }}
+                />
               </div>
             </div>
 
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
-                <p className="text-xs text-slate-400">Predicted Score</p>
-                <p className="mt-2 text-3xl font-black">78/100</p>
+                <p className="text-xs text-slate-400">Average Score</p>
+                <p className="mt-2 text-3xl font-black">{dashboardPreview.scoreLabel}</p>
               </div>
 
               <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
                 <p className="text-xs text-slate-400">Trend</p>
-                <p className="mt-2 text-3xl font-black">Improving</p>
+                <p className="mt-2 text-3xl font-black">{dashboardPreview.trend}</p>
               </div>
             </div>
 
             <div className="mt-4 rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
-              <p className="text-xs text-slate-400">Recommended Practice</p>
+              <p className="text-xs text-slate-400">
+                Recommended Practice
+                {dashboardPreview.attempts ? ` - ${dashboardPreview.attempts} saved attempts` : ""}
+              </p>
               <p className="mt-2 text-lg font-bold leading-7">
-                Practice more system design and technical-depth challenges.
+                {dashboardPreview.recommendation}
               </p>
             </div>
 

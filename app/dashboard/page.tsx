@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useUser } from "@clerk/nextjs";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { db } from "@/lib/firebase";
 import {
   ArrowLeft,
   BarChart3,
@@ -23,12 +26,29 @@ import {
 } from "lucide-react";
 
 type Interview = {
+  id?: string;
+  question?: string;
+  answer?: string;
+  sessionId?: string;
+  sessionNumber?: number;
+  questionNumber?: number;
+  followUpQuestion?: string;
+  followUpAnswer?: string;
   score: number;
   date?: string;
-  feedback?: string;
+  feedback?: any;
+  userId?: string;
+};
+
+type InterviewRow = Interview & {
+  originalIndex: number;
+  displaySessionNumber: number;
+  displayQuestionNumber: number;
+  sessionKey: string;
 };
 
 type Challenge = {
+  id?: string;
   challengeId?: number;
   title?: string;
   major?: string;
@@ -44,6 +64,7 @@ type Challenge = {
   difficulty?: number;
   answer?: string;
   sampleAnswer?: string;
+  userId?: string;
 };
 
 type Attempt = {
@@ -114,6 +135,38 @@ function getProgressBarColor(score: number) {
   if (score >= 80) return "bg-emerald-500";
   if (score >= 60) return "bg-amber-500";
   return "bg-rose-500";
+}
+
+function getScoreTextColor(score: number) {
+  if (score >= 80) return "text-emerald-700";
+  if (score >= 60) return "text-amber-700";
+  return "text-rose-700";
+}
+
+function getReadinessTheme(score: number | "—") {
+  const numericScore = typeof score === "number" ? score : 0;
+
+  if (numericScore >= 80) {
+    return {
+      panel: "bg-emerald-950",
+      icon: "bg-emerald-400/10 text-emerald-300",
+      label: "text-emerald-300",
+    };
+  }
+
+  if (numericScore >= 60) {
+    return {
+      panel: "bg-amber-950",
+      icon: "bg-amber-400/10 text-amber-300",
+      label: "text-amber-300",
+    };
+  }
+
+  return {
+    panel: "bg-rose-950",
+    icon: "bg-rose-400/10 text-rose-300",
+    label: "text-rose-300",
+  };
 }
 
 function getSkillInsights(attempts: Attempt[]) {
@@ -370,22 +423,226 @@ function StatCard({
   );
 }
 
+function normalizeFirestoreDate(value: any) {
+  if (!value) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  return undefined;
+}
+
+function normalizeIdentityText(value?: string) {
+  return (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getInterviewDedupeKey(interview: Interview) {
+  const questionNumber = Number(interview.questionNumber);
+
+  if (interview.sessionId && Number.isFinite(questionNumber) && questionNumber > 0) {
+    return `session:${interview.sessionId}:q:${questionNumber}`;
+  }
+
+  const sessionNumber = Number(interview.sessionNumber);
+  if (
+    Number.isFinite(sessionNumber) &&
+    sessionNumber > 0 &&
+    Number.isFinite(questionNumber) &&
+    questionNumber > 0
+  ) {
+    return [
+      "numbered",
+      sessionNumber,
+      questionNumber,
+      normalizeIdentityText(interview.question),
+      normalizeIdentityText(interview.answer),
+    ].join(":");
+  }
+
+  return [
+    "legacy",
+    getDateValue(interview.date),
+    Number(interview.score) || 0,
+    normalizeIdentityText(interview.question),
+    normalizeIdentityText(interview.answer),
+  ].join(":");
+}
+
+function dedupeInterviews(items: Interview[]) {
+  const byKey = new Map<string, Interview>();
+
+  items.forEach((item) => {
+    const key = getInterviewDedupeKey(item);
+    const existing = byKey.get(key);
+
+    if (!existing) {
+      byKey.set(key, item);
+      return;
+    }
+
+    const existingHasFollowUp = Boolean(existing.followUpQuestion || existing.followUpAnswer);
+    const itemHasFollowUp = Boolean((item as any).followUpQuestion || (item as any).followUpAnswer);
+
+    if ((!existingHasFollowUp && itemHasFollowUp) || (!existing.id && item.id)) {
+      byKey.set(key, item);
+    }
+  });
+
+  return [...byKey.values()];
+}
+
+function dedupeByIdentity<T extends { id?: string; date?: string; score?: number }>(
+  items: T[],
+) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+
+  for (const item of items) {
+    const key = item.id || `${item.date || "no-date"}-${item.score ?? "no-score"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  return deduped;
+}
+
+function buildInterviewRows(interviews: Interview[]): InterviewRow[] {
+  const chronological = interviews
+    .map((item, index) => ({ ...item, originalIndex: index }))
+    .sort((a, b) => getDateValue(a.date) - getDateValue(b.date));
+  const sessionKeys: string[] = [];
+
+  return chronological.map((interview, chronologicalIndex) => {
+    const sessionKey = getInterviewSessionKey(interview, chronologicalIndex);
+
+    if (!sessionKeys.includes(sessionKey)) {
+      sessionKeys.push(sessionKey);
+    }
+
+    return {
+      ...interview,
+      sessionKey,
+      displaySessionNumber: sessionKeys.indexOf(sessionKey) + 1,
+      displayQuestionNumber:
+        Number(interview.questionNumber) || (chronologicalIndex % 4) + 1,
+    };
+  });
+}
+
+function getInterviewSessionCount(interviews: Interview[]) {
+  return new Set(buildInterviewRows(interviews).map((row) => row.sessionKey)).size;
+}
+
+function getInterviewSessionKey(
+  interview: Interview & { originalIndex: number },
+  chronologicalIndex: number,
+) {
+  if (interview.sessionId) return `id:${interview.sessionId}`;
+
+  return `legacy:${Math.floor(chronologicalIndex / 4) + 1}`;
+}
+
+function getLatestTwoSessionQuestions(interviews: Interview[]) {
+  const rows = buildInterviewRows(interviews);
+  const sessionNumbers = [...new Set(rows.map((row) => row.displaySessionNumber))]
+    .sort((a, b) => b - a)
+    .slice(0, 2);
+
+  return rows
+    .filter((row) => sessionNumbers.includes(row.displaySessionNumber))
+    .sort((a, b) => {
+      if (a.displaySessionNumber !== b.displaySessionNumber) {
+        return b.displaySessionNumber - a.displaySessionNumber;
+      }
+
+      return a.displayQuestionNumber - b.displayQuestionNumber;
+    });
+}
+
 export default function DashboardPage() {
+  const { user, isLoaded } = useUser();
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
 
   useEffect(() => {
-    const savedInterviews = JSON.parse(
-      localStorage.getItem("interviews") || "[]"
-    );
+    if (!isLoaded) return;
 
-    const savedChallenges = JSON.parse(
-      localStorage.getItem("challenges") || "[]"
-    );
+    async function loadDashboardData() {
+      if (!user?.id) {
+        setInterviews([]);
+        setChallenges([]);
+        return;
+      }
 
-    setInterviews(savedInterviews);
-    setChallenges(savedChallenges);
-  }, []);
+      const localInterviews = JSON.parse(
+        localStorage.getItem(`interviews:${user.id}`) || "[]",
+      );
+      const localChallenges = JSON.parse(
+        localStorage.getItem(`challenges:${user.id}`) || "[]",
+      );
+      const cleanLocalInterviews = dedupeInterviews(localInterviews);
+
+      setInterviews(cleanLocalInterviews);
+      setChallenges(localChallenges);
+      localStorage.setItem(`interviews:${user.id}`, JSON.stringify(cleanLocalInterviews));
+
+      try {
+        const [interviewSnapshot, challengeSnapshot] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, "interviewResults"),
+              where("userId", "==", user.id),
+            ),
+          ),
+          getDocs(
+            query(
+              collection(db, "challengeResults"),
+              where("userId", "==", user.id),
+            ),
+          ),
+        ]);
+
+        const dbInterviews = interviewSnapshot.docs.map((doc) => {
+          const data = doc.data() as any;
+          return {
+            id: doc.id,
+            ...data,
+            score: Number(data.score) || 0,
+            date: normalizeFirestoreDate(data.date) || normalizeFirestoreDate(data.createdAt),
+          } as Interview;
+        });
+
+        const dbChallenges = challengeSnapshot.docs.map((doc) => {
+          const data = doc.data() as any;
+          return {
+            id: doc.id,
+            ...data,
+            score: Number(data.score) || 0,
+            date: normalizeFirestoreDate(data.date) || normalizeFirestoreDate(data.createdAt),
+          } as Challenge;
+        });
+
+        const mergedInterviews = dedupeInterviews([...dbInterviews, ...cleanLocalInterviews]);
+        const mergedChallenges = dedupeByIdentity([...dbChallenges, ...localChallenges]);
+
+        setInterviews(mergedInterviews);
+        setChallenges(mergedChallenges);
+
+        localStorage.setItem(`interviews:${user.id}`, JSON.stringify(mergedInterviews));
+        localStorage.setItem(`challenges:${user.id}`, JSON.stringify(mergedChallenges));
+      } catch (error) {
+        console.error("Could not load dashboard data from Firebase:", error);
+        const fallbackInterviews = JSON.parse(localStorage.getItem(`interviews:${user.id}`) || "[]");
+        setInterviews(dedupeInterviews(fallbackInterviews));
+        setChallenges(JSON.parse(localStorage.getItem(`challenges:${user.id}`) || "[]"));
+      }
+    }
+
+    loadDashboardData();
+  }, [isLoaded, user?.id]);
 
   const bestInterviewScore = interviews.length
     ? Math.max(...interviews.map((i) => Number(i.score)))
@@ -413,15 +670,14 @@ export default function DashboardPage() {
       )
     : "—";
 
+  const interviewSessionCount = getInterviewSessionCount(interviews);
+
   const progressInsights = useMemo(
     () => getProgressInsights(interviews, challenges),
     [interviews, challenges]
   );
 
-  const latestInterviews = [...interviews]
-    .map((interview, index) => ({ ...interview, originalIndex: index }))
-    .sort((a, b) => getDateValue(b.date) - getDateValue(a.date))
-    .slice(0, 5);
+  const latestInterviews = getLatestTwoSessionQuestions(interviews);
 
   const latestChallenges = [...challenges]
     .map((challenge, index) => ({ ...challenge, originalIndex: index }))
@@ -429,6 +685,7 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   const totalAttempts = interviews.length + challenges.length;
+  const readinessTheme = getReadinessTheme(progressInsights.predictedNextScore);
 
   const trendIcon =
     progressInsights.trend === "Dropping" ||
@@ -497,14 +754,14 @@ export default function DashboardPage() {
             <CardContent className="p-0">
               <div className="grid gap-0 xl:grid-cols-[0.9fr_1.1fr]">
                 {/* Left dark panel */}
-                <div className="bg-slate-950 p-8 text-white">
+                <div className={`${readinessTheme.panel} p-8 text-white`}>
                   <div className="flex items-center gap-4">
-                    <div className="rounded-2xl bg-emerald-400/10 p-4 text-emerald-300">
+                    <div className={`rounded-2xl p-4 ${readinessTheme.icon}`}>
                       <Brain className="h-7 w-7" />
                     </div>
 
                     <div>
-                      <p className="text-sm font-semibold text-emerald-300">
+                      <p className={`text-sm font-semibold ${readinessTheme.label}`}>
                         Progress Insights
                       </p>
                       <h2 className="mt-1 text-3xl font-black">
@@ -624,7 +881,11 @@ export default function DashboardPage() {
                       Weakest Skill
                     </p>
 
-                    <h3 className="mt-3 text-2xl font-black text-rose-700">
+                    <h3
+                      className={`mt-3 text-2xl font-black ${getScoreTextColor(
+                        progressInsights.weakestScore,
+                      )}`}
+                    >
                       {progressInsights.weakestSkill}
                     </h3>
 
@@ -639,7 +900,9 @@ export default function DashboardPage() {
 
                         <div className="mt-4 h-2 rounded-full bg-slate-100">
                           <div
-                            className="h-2 rounded-full bg-rose-500"
+                            className={`h-2 rounded-full ${getProgressBarColor(
+                              progressInsights.weakestScore,
+                            )}`}
                             style={{
                               width: `${clamp(progressInsights.weakestScore, 0, 100)}%`,
                             }}
@@ -657,15 +920,15 @@ export default function DashboardPage() {
         {/* Stats */}
         <section className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            title="Interviews Completed"
-            value={interviews.length}
+            title="Interview Sessions"
+            value={interviewSessionCount}
             icon={<BarChart3 className="h-5 w-5" />}
-            subtitle="Saved real-time interview sessions"
+            subtitle={`${interviews.length} scored questions saved`}
             accent="emerald"
           />
 
           <StatCard
-            title="Average Interview Score"
+            title="Average Question Score"
             value={averageInterviewScore}
             icon={<History className="h-5 w-5" />}
             score={
@@ -675,7 +938,7 @@ export default function DashboardPage() {
             }
             subtitle={
               typeof bestInterviewScore === "number"
-                ? `Best interview score: ${bestInterviewScore}/100`
+                ? `Best question score: ${bestInterviewScore}/100`
                 : "Complete an interview to calculate this"
             }
             accent="emerald"
@@ -744,7 +1007,7 @@ export default function DashboardPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="mt-6 space-y-3">
+                <div className="mt-6 max-h-[520px] space-y-3 overflow-y-auto pr-2">
                   {latestInterviews.map((interview, index) => {
                     const originalIndex = interview.originalIndex;
                     const score = Number(interview.score) || 0;
@@ -758,7 +1021,8 @@ export default function DashboardPage() {
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="font-bold text-slate-800">
-                              Interview {originalIndex + 1}
+                              Interview {interview.displaySessionNumber} - Question{" "}
+                              {interview.displayQuestionNumber}
                             </p>
                             <p className="mt-1 text-sm text-slate-500">
                               {formatDate(interview.date)}

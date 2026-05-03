@@ -72,7 +72,8 @@ STOPWORDS = {
 }
 
 IMPORTANT_TERMS = {
-    "api", "backend", "frontend", "react", "next", "javascript", "typescript",
+    "api", "endpoint", "endpoints", "backend", "frontend", "fullstack",
+    "full-stack", "react", "next", "javascript", "typescript",
     "python", "java", "sql", "database", "postgres", "mongodb", "firebase",
     "cloud", "aws", "docker", "kubernetes", "security", "secure",
     "authentication", "authorization", "encryption", "payment", "mobile",
@@ -83,10 +84,21 @@ IMPORTANT_TERMS = {
 HIGH_PRIORITY_TERMS = {
     "payment", "mobile", "security", "secure", "authentication",
     "authorization", "encryption", "fraud", "transaction", "transactions",
+    "api", "endpoint", "endpoints", "rest", "backend", "frontend",
+    "fullstack", "full-stack", "javascript", "typescript",
 }
 
 BAD_QUESTION_PATTERNS = (
+    "when would you use sql injection over big o notation",
     "rest api over virtual memory",
+    "rest api over stack",
+    "rest api over linked list",
+    "rest api over dictionary",
+    "rest api over exception handling",
+    "rest api over multithreading",
+    "rest api over big o notation",
+    "when would you use rest api over",
+    "difference between rest api and",
     "api over virtual memory",
 )
 
@@ -166,7 +178,40 @@ def extract_focus_terms(*texts: str) -> set[str]:
         if word not in STOPWORDS and (len(word) >= 4 or word in IMPORTANT_TERMS)
     }
 
-    return terms | {term for term in IMPORTANT_TERMS if term in combined}
+    terms = terms | {term for term in IMPORTANT_TERMS if term in combined}
+
+    if "endpoint" in terms or "endpoints" in terms or "rest" in terms:
+        terms.add("api")
+    if "full" in terms and "stack" in terms:
+        terms.update({"fullstack", "full-stack", "frontend", "backend", "api"})
+
+    return terms
+
+
+def has_technical_focus(focus_terms: set[str]) -> bool:
+    return bool(
+        focus_terms
+        & {
+            "api", "endpoint", "endpoints", "backend", "frontend",
+            "fullstack", "full-stack", "javascript", "typescript", "react",
+            "node", "database", "sql", "security", "authentication",
+        }
+    )
+
+
+def priority_focus_groups(focus_terms: set[str]) -> list[set[str]]:
+    groups: list[set[str]] = []
+
+    if focus_terms & {"api", "endpoint", "endpoints", "rest"}:
+        groups.append({"api", "endpoint", "endpoints", "rest", "cors"})
+    if focus_terms & {"javascript", "typescript"}:
+        groups.append({"javascript", "typescript", "closure", "event delegation"})
+    if focus_terms & {"backend", "fullstack", "full-stack"}:
+        groups.append({"backend", "server", "api", "database"})
+    if focus_terms & {"frontend", "react", "next"}:
+        groups.append({"frontend", "react", "next", "javascript"})
+
+    return groups
 
 
 def score_question_relevance(question_text: str, focus_terms: set[str]) -> int:
@@ -261,6 +306,10 @@ def select_questions(
             return pool_df.head(0)
 
         pool_df = pool_df.copy()
+
+        if not focus_terms:
+            return pool_df.sample(n=min(take_n, len(pool_df))).reset_index(drop=True)
+
         pool_df["relevance_score"] = pool_df["question_text"].map(
             lambda text: score_question_relevance(text, focus_terms)
         )
@@ -271,8 +320,47 @@ def select_questions(
         best_relevance = int(ranked_pool["relevance_score"].max())
         if best_relevance > 0:
             ranked_pool = ranked_pool[ranked_pool["relevance_score"] > 0].reset_index(drop=True)
-        shortlist = ranked_pool.head(max(take_n * 12, take_n))
-        return shortlist.sample(n=min(take_n, len(shortlist))).reset_index(drop=True)
+
+        priority_rows = []
+        used_questions: set[str] = set()
+        for group in priority_focus_groups(focus_terms):
+            if len(priority_rows) >= take_n:
+                break
+
+            group_match = ranked_pool[
+                ranked_pool["question_text"].str.lower().map(
+                    lambda text: any(term in text for term in group)
+                )
+            ].head(1)
+
+            if group_match.empty:
+                continue
+
+            row = group_match.iloc[0].to_dict()
+            question_text = clean_text(row.get("question_text"))
+            if question_text and question_text not in used_questions:
+                priority_rows.append(row)
+                used_questions.add(question_text)
+
+        if priority_rows:
+            remaining_ranked = ranked_pool[
+                ~ranked_pool["question_text"].isin(used_questions)
+            ].reset_index(drop=True)
+            ranked_pool = pd.concat(
+                [pd.DataFrame(priority_rows), remaining_ranked],
+                ignore_index=True,
+            )
+
+        shortlist = ranked_pool.head(max(take_n * 4, take_n))
+        locked = pd.DataFrame(priority_rows).head(take_n) if priority_rows else shortlist.head(0)
+        remaining_slots = take_n - len(locked)
+        remaining_shortlist = shortlist[
+            ~shortlist["question_text"].isin(locked.get("question_text", []))
+        ]
+        sampled = remaining_shortlist.sample(
+            n=min(remaining_slots, len(remaining_shortlist))
+        ) if remaining_slots > 0 else remaining_shortlist.head(0)
+        return pd.concat([locked, sampled], ignore_index=True).reset_index(drop=True)
 
     def refine_behavioral_pool(pool_df: pd.DataFrame) -> pd.DataFrame:
         if job_category == "human_resources":
@@ -295,9 +383,13 @@ def select_questions(
         behavioral_pool = refine_behavioral_pool(behavioral_pool)
         pool = rank_and_sample(behavioral_pool, n)
     else:
+        technical_count = n // 2
+        if has_technical_focus(focus_terms):
+            technical_count = max(technical_count, n - 1)
+
         technical = rank_and_sample(
             filtered[filtered["question_type"] == "technical"].copy(),
-            n // 2,
+            technical_count,
         )
         behavioral_pool = filtered[filtered["question_type"] == "behavioral"].copy()
         if behavioral_pool.empty:
@@ -325,20 +417,22 @@ def build_payload(raw: dict[str, object]) -> dict[str, object]:
     cv_text = clean_text(raw.get("cvText"))
     job_description = clean_text(raw.get("jobDescription"))
     interview_type = clean_text(raw.get("interviewType")) or "Mixed"
+    category_override = clean_text(raw.get("categoryOverride")).lower()
 
     combined_text = " ".join(part for part in [cv_text, job_description] if part).strip()
-    if not combined_text:
-        raise ValueError("Provide CV text or a job description.")
+    if not combined_text and not category_override:
+        raise ValueError("Provide CV text, a job description, or a selected category.")
 
     inferred_category = DEFAULT_CATEGORY
-    if RESUME_MODEL_PATH.exists():
+    if combined_text and RESUME_MODEL_PATH.exists():
         model = joblib.load(RESUME_MODEL_PATH)
         inferred_category = str(model.predict([combined_text])[0])
 
-    question_category = QUESTION_CATEGORY_MAP.get(inferred_category, "software_engineering")
+    selected_category = category_override or inferred_category
+    question_category = QUESTION_CATEGORY_MAP.get(selected_category, "software_engineering")
 
     questions_df = load_questions()
-    focus_terms = extract_focus_terms(cv_text, job_description)
+    focus_terms = extract_focus_terms(cv_text, job_description) if job_description else set()
     selected = select_questions(questions_df, question_category, interview_type, focus_terms, n=4)
 
     difficulty_model = joblib.load(DIFFICULTY_MODEL_PATH) if DIFFICULTY_MODEL_PATH.exists() else None
@@ -366,6 +460,7 @@ def build_payload(raw: dict[str, object]) -> dict[str, object]:
 
     return {
         "inferredCategory": inferred_category,
+        "selectedCategory": selected_category,
         "questionCategory": question_category,
         "interviewType": interview_type,
         "questionCount": len(questions),
