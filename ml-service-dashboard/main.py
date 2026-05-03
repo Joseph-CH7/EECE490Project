@@ -21,7 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-semantic_model = SentenceTransformer("all-MiniLM-L6-v2")
+semantic_model: SentenceTransformer | None = None
 PROGRESS_MODEL_PATH = Path(__file__).with_name("progress_model.joblib")
 progress_artifact = joblib.load(PROGRESS_MODEL_PATH) if PROGRESS_MODEL_PATH.exists() else None
 
@@ -65,6 +65,13 @@ def normalize_skill(value: Any) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def get_semantic_model() -> SentenceTransformer:
+    global semantic_model
+    if semantic_model is None:
+        semantic_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return semantic_model
 
 
 def extract_attempts(data: ProgressRequest) -> list[dict[str, Any]]:
@@ -198,9 +205,10 @@ def recommendation_from_insights(readiness: str, trend: str, skills: dict[str, A
 
 @app.post("/evaluate-challenge")
 def evaluate_challenge(data: EvaluationRequest):
-    expected_embedding = semantic_model.encode([data.expected_answer])
-    user_embedding = semantic_model.encode([data.user_answer])
-    question_embedding = semantic_model.encode([data.question])
+    model = get_semantic_model()
+    expected_embedding = model.encode([data.expected_answer])
+    user_embedding = model.encode([data.user_answer])
+    question_embedding = model.encode([data.question])
 
     quality_similarity = cosine_similarity(user_embedding, expected_embedding)[0][0]
     relevance_similarity = cosine_similarity(user_embedding, question_embedding)[0][0]

@@ -23,8 +23,8 @@ services:
 
   ml-api:
     build:
-      context: .
-      dockerfile: ml-service-dashboard/Dockerfile
+      context: ./ml-service-dashboard
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     healthcheck:

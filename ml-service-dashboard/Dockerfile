@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -10,12 +9,12 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-COPY ml-service-dashboard/requirements.txt ./requirements.txt
+COPY requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install --retries 10 --timeout 300 -r requirements.txt
 
-COPY ml-service-dashboard ./
+COPY . ./
 
 EXPOSE 8000
 
