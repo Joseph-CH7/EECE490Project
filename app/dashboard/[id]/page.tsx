@@ -24,6 +24,14 @@ type SavedQuestion = {
     strengths?: string[];
     improvements?: string[];
     followUp?: string;
+    delivery?: number;
+    speechMetrics?: {
+      fillerCount?: number;
+      fillerRatePer100Words?: number;
+      wordsPerMinute?: number | null;
+      fluencyScore?: number;
+      toneScore?: number;
+    } | null;
   };
   date: string;
 };
@@ -101,6 +109,40 @@ export default function QuestionReviewPage() {
                 {item.score}/100
               </p>
             </div>
+
+            {item.feedback?.speechMetrics ? (
+              <div className="grid gap-3 rounded-3xl bg-slate-50 p-5 sm:grid-cols-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-500">Delivery</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">
+                    {item.feedback.delivery ?? "—"}/10
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold text-slate-500">Filler Words</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">
+                    {item.feedback.speechMetrics.fillerCount ?? 0}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold text-slate-500">Fluency</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">
+                    {item.feedback.speechMetrics.fluencyScore ?? "—"}/10
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-sm font-semibold text-slate-500">Pace</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">
+                    {item.feedback.speechMetrics.wordsPerMinute
+                      ? `${item.feedback.speechMetrics.wordsPerMinute} wpm`
+                      : "Not timed"}
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             <div>
               <p className="text-sm font-semibold text-slate-500">Strengths</p>

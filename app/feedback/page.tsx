@@ -227,6 +227,47 @@ export default function FeedbackPage() {
                 </div>
               </div>
 
+              {feedback.speechMetrics ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Filler Words</p>
+                    <p className="mt-1 text-xl font-bold">
+                      {feedback.speechMetrics.fillerCount}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {feedback.speechMetrics.fillerRatePer100Words} per 100 words
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Voice Fluency</p>
+                    <p className="mt-1 text-xl font-bold">
+                      {feedback.speechMetrics.fluencyScore}/10
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Pace:{" "}
+                      {feedback.speechMetrics.wordsPerMinute
+                        ? `${feedback.speechMetrics.wordsPerMinute} wpm`
+                        : "typed or not timed"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Tone</p>
+                    <p className="mt-1 text-xl font-bold">
+                      {feedback.speechMetrics.toneScore}/10
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Pace Score</p>
+                    <p className="mt-1 text-xl font-bold">
+                      {feedback.speechMetrics.paceScore}/10
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
               {feedback.visualMetrics ? (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-2xl bg-slate-50 p-4">

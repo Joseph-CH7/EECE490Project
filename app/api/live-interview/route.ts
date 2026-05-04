@@ -23,6 +23,7 @@ type LiveInterviewRequest = {
   currentQuestion?: string;
   interviewType?: string;
   visualMetrics?: VisualMetrics | null;
+  speechDurationSeconds?: number | null;
 };
 
 function normalizeText(value: unknown) {
@@ -378,6 +379,7 @@ async function buildGeminiFeedback(
   currentQuestion: string,
   interviewType: string,
   visualMetrics: VisualMetrics | null,
+  speechDurationSeconds: number | null,
 ): Promise<{ reply: string; feedback: LiveInterviewFeedback } | null> {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -390,6 +392,7 @@ async function buildGeminiFeedback(
     currentQuestion,
     interviewType,
     visualMetrics,
+    speechDurationSeconds,
   );
 
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -428,7 +431,7 @@ Scoring guidance:
 - relevance: how directly the answer addresses the question.
 - keyword: use of role-relevant concepts, skills, tools, and terminology.
 - semantic: depth, reasoning, specificity, and interview quality.
-- delivery: clarity and structure of the written/spoken answer only.
+- delivery: clarity, structure, fluency, confident tone, and filler-word control in the spoken answer.
 - strengths/improvements must be concrete and based on the answer.
 - followUp must adapt to the candidate answer and should not repeat the original question.
 - followUp must explicitly build on one of the ranked candidate answer keywords when any are listed.
@@ -451,7 +454,10 @@ Scoring guidance:
   const relevance = scoreFromModel(parsed.relevance, baselineFeedback.relevance);
   const keyword = scoreFromModel(parsed.keyword, baselineFeedback.keyword);
   const semantic = scoreFromModel(parsed.semantic, baselineFeedback.semantic);
-  const delivery = scoreFromModel(parsed.delivery, baselineFeedback.delivery);
+  const delivery = Math.min(
+    scoreFromModel(parsed.delivery, baselineFeedback.delivery),
+    baselineFeedback.delivery,
+  );
   const visualPresence = baselineFeedback.visualPresence;
   const visualScore = visualPresence ?? 6.2;
 
@@ -540,6 +546,11 @@ export async function POST(req: Request) {
     const currentQuestion = normalizeText(body.currentQuestion);
     const interviewType = normalizeText(body.interviewType) || "Mixed";
     const visualMetrics = body.visualMetrics ?? null;
+    const speechDurationSeconds =
+      typeof body.speechDurationSeconds === "number" &&
+      Number.isFinite(body.speechDurationSeconds)
+        ? body.speechDurationSeconds
+        : null;
 
     const latestCandidateAnswer = [...conversation]
       .reverse()
@@ -562,6 +573,7 @@ export async function POST(req: Request) {
         currentQuestion,
         interviewType,
         visualMetrics,
+        speechDurationSeconds,
       );
     } catch (error) {
       console.error("Gemini feedback failed, using local fallback:", error);
@@ -574,6 +586,7 @@ export async function POST(req: Request) {
         currentQuestion,
         interviewType,
         visualMetrics,
+        speechDurationSeconds,
       );
 
     const reply =

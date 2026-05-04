@@ -29,6 +29,7 @@ The system is intended for students, job seekers, university career centers, and
 - Randomized interview questions when no job description is provided
 - Technical and behavioral mock interview practice
 - Follow-up questions when the answer needs more detail
+- Voice-delivery analysis for filler words, fluency, speaking pace, and confident tone
 - Camera-based visual-presence signals during interviews
 - Challenge-based practice
 - ML-based challenge answer evaluation
@@ -47,7 +48,7 @@ The system is intended for students, job seekers, university career centers, and
 3. The user optionally uploads a CV and/or enters a job description.
 4. The app generates role-appropriate interview questions.
 5. The user answers each question and optional follow-up.
-6. The app scores the answers and generates feedback.
+6. The app scores the answers, including content quality, voice delivery, and visual presence when enabled.
 7. Results are saved and shown in the dashboard.
 
 ---
@@ -66,6 +67,7 @@ The system is intended for students, job seekers, university career centers, and
 | Resume Model | LinearSVC | Predicts resume/job category |
 | Question Model | TF-IDF + classifier | Predicts whether questions are technical or behavioral |
 | Semantic Evaluation | SentenceTransformer + cosine similarity | Compares answer meaning against expected content |
+| Voice Delivery | Transcript timing + heuristic analysis | Detects filler words, speaking pace, fluency, and confident tone |
 | Progress Model | Random Forest Regressor | Predicts the user's next expected score |
 | Readiness Model | Random Forest Classifier | Predicts readiness level from progress features |
 | Deployment | Docker / Docker Compose | Runs the frontend and ML API as reproducible services |
@@ -108,6 +110,10 @@ Input: question, expected answer, user answer
 Method: SentenceTransformer embeddings + cosine similarity
 Output: relevance, semantic similarity, score, feedback
 ```
+
+### Voice Delivery Evaluation
+
+Mock interview answers include delivery analysis when the user speaks through the browser microphone. The app estimates filler-word frequency, speaking pace, fluency, and confident tone from the transcript and speaking duration. These delivery signals affect the final interview score together with answer relevance, technical depth, and optional camera-based visual-presence metrics.
 
 ### Progress and Readiness Prediction
 
@@ -387,7 +393,7 @@ Future improvements include:
 - Adding more fairness and robustness tests
 - Improving deployment monitoring
 - Adding more detailed ablation results
-- Improving voice delivery metrics for filler words, pauses, and speaking rate
+- Adding deeper acoustic voice metrics such as pauses, pitch variation, and speaking-rate stability
 
 ---
 

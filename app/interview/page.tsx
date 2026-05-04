@@ -141,6 +141,7 @@ function combineQuestionFeedback(
     includesOutcome: mainFeedback.includesOutcome || followUpFeedback.includesOutcome,
     visualPresence: mainFeedback.visualPresence,
     visualMetrics: mainFeedback.visualMetrics,
+    speechMetrics: mainFeedback.speechMetrics,
   };
 }
 
@@ -168,6 +169,8 @@ export default function InterviewPage() {
   const visualMetricsRef = useRef<VisualMetrics | null>(null);
   const currentSessionIdRef = useRef<string>("");
   const currentSessionNumberRef = useRef<number>(1);
+  const listeningStartedAtRef = useRef<number | null>(null);
+  const accumulatedListeningMsRef = useRef(0);
 
   const getUserStorageKey = (key: string) =>
     user?.id ? `${key}:${user.id}` : key;
@@ -180,6 +183,20 @@ export default function InterviewPage() {
   const getCurrentVisualMetrics = () => {
     const metrics = visualMetricsRef.current || visualMetrics;
     return metrics && metrics.sampleCount > 0 ? metrics : null;
+  };
+
+  const resetSpeechTiming = () => {
+    listeningStartedAtRef.current = null;
+    accumulatedListeningMsRef.current = 0;
+  };
+
+  const getCurrentSpeechDurationSeconds = () => {
+    const activeListeningMs = listeningStartedAtRef.current
+      ? Date.now() - listeningStartedAtRef.current
+      : 0;
+    const totalMs = accumulatedListeningMsRef.current + activeListeningMs;
+
+    return totalMs > 0 ? Math.round(totalMs / 100) / 10 : null;
   };
 
   const getNextSessionNumber = () => {
@@ -419,10 +436,17 @@ export default function InterviewPage() {
     recognition.lang = "en-US";
 
     recognition.onstart = () => {
+      if (!listeningStartedAtRef.current) {
+        listeningStartedAtRef.current = Date.now();
+      }
       setIsListening(true);
     };
 
     recognition.onend = () => {
+      if (listeningStartedAtRef.current) {
+        accumulatedListeningMsRef.current += Date.now() - listeningStartedAtRef.current;
+        listeningStartedAtRef.current = null;
+      }
       setIsListening(false);
     };
 
@@ -497,6 +521,7 @@ export default function InterviewPage() {
     if (!questions.length) return;
 
     finalTranscriptRef.current = "";
+    resetSpeechTiming();
     currentSessionIdRef.current = `interview-${Date.now()}`;
     currentSessionNumberRef.current = getNextSessionNumber();
     askedQuestionKeysRef.current = new Set([normalizeQuestionKey(questions[0])]);
@@ -580,6 +605,7 @@ export default function InterviewPage() {
     try {
       if (followUpPrompt) {
         let followUpFeedback: LiveInterviewFeedback | null = null;
+        const speechDurationSeconds = getCurrentSpeechDurationSeconds();
 
         try {
           const followUpRes = await fetch("/api/live-interview", {
@@ -592,6 +618,7 @@ export default function InterviewPage() {
               currentQuestion: followUpPrompt,
               interviewType,
               visualMetrics: getCurrentVisualMetrics(),
+              speechDurationSeconds,
             }),
           });
 
@@ -609,6 +636,7 @@ export default function InterviewPage() {
         persistFollowUpAnswer(followUpPrompt, currentAnswer, followUpFeedback);
 
         finalTranscriptRef.current = "";
+        resetSpeechTiming();
         setAnswer("");
         setFollowUpPrompt(null);
 
@@ -662,6 +690,7 @@ export default function InterviewPage() {
           currentQuestion,
           interviewType,
           visualMetrics: getCurrentVisualMetrics(),
+          speechDurationSeconds: getCurrentSpeechDurationSeconds(),
         }),
       });
 
@@ -686,6 +715,7 @@ export default function InterviewPage() {
       const feedback = (data.feedback || null) as LiveInterviewFeedback | null;
 
       finalTranscriptRef.current = "";
+      resetSpeechTiming();
       setAnswer("");
 
       if (typeof window !== "undefined" && feedback) {

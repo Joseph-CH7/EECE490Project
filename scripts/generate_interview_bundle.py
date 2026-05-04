@@ -103,6 +103,91 @@ BAD_QUESTION_PATTERNS = (
     "api over virtual memory",
 )
 
+CONCEPT_GROUPS = {
+    "array": "data_structure",
+    "linked list": "data_structure",
+    "dictionary": "data_structure",
+    "hashmap": "data_structure",
+    "queue": "data_structure",
+    "stack": "data_structure",
+    "inheritance": "oop",
+    "encapsulation": "oop",
+    "polymorphism": "oop",
+    "interface": "oop",
+    "class": "oop",
+    "object": "oop",
+    "deadlock": "concurrency",
+    "multithreading": "concurrency",
+    "thread": "concurrency",
+    "race condition": "concurrency",
+    "sql injection": "security",
+    "xss": "security",
+    "authentication": "security",
+    "authorization": "security",
+    "merge sort": "algorithm",
+    "quick sort": "algorithm",
+    "binary search": "algorithm",
+    "big o notation": "algorithm",
+    "recursion": "algorithm",
+    "pointers": "memory",
+    "pointer": "memory",
+    "virtual memory": "memory",
+    "heap memory": "memory",
+    "stack memory": "memory",
+}
+
+ALLOWED_CROSS_GROUP_PAIRS = {
+    frozenset({"sql", "nosql"}),
+    frozenset({"http", "https"}),
+    frozenset({"git", "svn"}),
+    frozenset({"black-box testing", "white-box testing"}),
+    frozenset({"java", "javascript"}),
+    frozenset({"stack memory", "heap memory"}),
+}
+
+FALLBACK_SOFTWARE_QUESTIONS = [
+    {
+        "question_text": "What is a RESTful API, and how would you design one for a simple user-management feature?",
+        "question_type": "technical",
+        "job_category": "software_engineering",
+        "difficulty": "medium",
+        "source": "fallback",
+        "source_priority": 0,
+    },
+    {
+        "question_text": "Explain the difference between SQL and NoSQL databases, and give one case where each is a better choice.",
+        "question_type": "technical",
+        "job_category": "software_engineering",
+        "difficulty": "medium",
+        "source": "fallback",
+        "source_priority": 0,
+    },
+    {
+        "question_text": "How would you debug a frontend page that is not showing updated data after an API request?",
+        "question_type": "technical",
+        "job_category": "software_engineering",
+        "difficulty": "medium",
+        "source": "fallback",
+        "source_priority": 0,
+    },
+    {
+        "question_text": "Tell me about a time when you had to make a technical decision with incomplete information.",
+        "question_type": "behavioral",
+        "job_category": "software_engineering",
+        "difficulty": "medium",
+        "source": "fallback",
+        "source_priority": 0,
+    },
+    {
+        "question_text": "Describe a situation where you took ownership of a problem outside your formal responsibilities.",
+        "question_type": "behavioral",
+        "job_category": "software_engineering",
+        "difficulty": "medium",
+        "source": "fallback",
+        "source_priority": 0,
+    },
+]
+
 
 def clean_text(value: object) -> str:
     if value is None or pd.isna(value):
@@ -132,6 +217,69 @@ def question_signature(text: str) -> str:
         if len(word) > 3 and word not in STOPWORDS
     ]
     return " ".join(sorted(words[:8]))
+
+
+def find_concepts(text: str) -> list[str]:
+    lowered = text.lower()
+    return [
+        concept
+        for concept in CONCEPT_GROUPS
+        if re.search(rf"(^|[^a-z0-9]){re.escape(concept)}([^a-z0-9]|$)", lowered)
+    ]
+
+
+def is_bad_comparison_question(text: str) -> bool:
+    lowered = text.lower()
+    is_comparison = (
+        "difference between" in lowered or
+        re.search(r"\bwhen would you use\b.+\bover\b", lowered) is not None
+    )
+
+    if not is_comparison:
+        return False
+
+    concepts = find_concepts(text)
+    if len(concepts) < 2:
+        return False
+
+    for first_index, first in enumerate(concepts):
+        for second in concepts[first_index + 1:]:
+            if frozenset({first, second}) in ALLOWED_CROSS_GROUP_PAIRS:
+                return False
+
+            if CONCEPT_GROUPS[first] != CONCEPT_GROUPS[second]:
+                return True
+
+    return False
+
+
+def filter_bad_questions(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    filtered = df.copy()
+    lowered = filtered["question_text"].str.lower()
+
+    for pattern in BAD_QUESTION_PATTERNS:
+        filtered = filtered[~lowered.str.contains(pattern, na=False)].copy()
+        lowered = filtered["question_text"].str.lower()
+
+    filtered = filtered[
+        ~filtered["question_text"].map(is_bad_comparison_question)
+    ].copy()
+
+    if "source" in filtered.columns:
+        synthetic_comparisons = (
+            filtered["source"].eq("full_interview_questions_dataset") &
+            filtered["question_text"].str.lower().str.contains(
+                r"difference between|when would you use .+ over ",
+                regex=True,
+                na=False,
+            )
+        )
+        filtered = filtered[~synthetic_comparisons].copy()
+
+    return filtered
 
 
 def dedupe_similar_questions(df: pd.DataFrame) -> pd.DataFrame:
@@ -282,8 +430,7 @@ def load_questions() -> pd.DataFrame:
         df["source_priority"] = 4
 
     df = df[df["question_text"] != ""].copy()
-    for pattern in BAD_QUESTION_PATTERNS:
-        df = df[~df["question_text"].str.lower().str.contains(pattern, na=False)].copy()
+    df = filter_bad_questions(df)
     df = df.drop_duplicates(subset=["question_text"])
     return df
 
@@ -407,10 +554,18 @@ def select_questions(
 
     if len(pool) < n:
         remaining = filtered[~filtered["question_text"].isin(pool["question_text"])]
+        remaining = filter_bad_questions(remaining)
         extra = remaining.sample(n=min(n - len(pool), len(remaining)))
         pool = pd.concat([pool, extra], ignore_index=True)
 
     pool = dedupe_similar_questions(pool)
+    pool = filter_bad_questions(pool)
+
+    if len(pool) < n and job_category == "software_engineering":
+        fallback = pd.DataFrame(FALLBACK_SOFTWARE_QUESTIONS)
+        fallback = fallback[~fallback["question_text"].isin(pool["question_text"])]
+        pool = pd.concat([pool, fallback.head(n - len(pool))], ignore_index=True)
+
     return rank_and_sample(pool, n)
 
 

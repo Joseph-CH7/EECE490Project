@@ -7,6 +7,16 @@ export type VisualMetrics = {
   averageEyeContactScore: number;
 };
 
+export type SpeechDeliveryMetrics = {
+  fillerCount: number;
+  fillerRatePer100Words: number;
+  wordsPerMinute: number | null;
+  paceScore: number;
+  fluencyScore: number;
+  toneScore: number;
+  deliveryScore: number;
+};
+
 export type LiveInterviewFeedback = {
   totalScore: number;
   relevance: number;
@@ -21,6 +31,7 @@ export type LiveInterviewFeedback = {
   includesExample: boolean;
   includesOutcome: boolean;
   visualMetrics: VisualMetrics | null;
+  speechMetrics: SpeechDeliveryMetrics | null;
 };
 
 export type InterviewFeedbackEntry = {
@@ -50,6 +61,7 @@ export type InterviewSessionFeedback = {
   includesExampleRate: number;
   includesOutcomeRate: number;
   visualMetrics: VisualMetrics | null;
+  speechMetrics: SpeechDeliveryMetrics | null;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -73,6 +85,100 @@ function normalizedAnswerWords(text: string) {
     .replace(/[^a-z0-9+#.\s]/g, " ")
     .split(/\s+/)
     .filter(Boolean);
+}
+
+const FILLER_PATTERNS = [
+  /\bum+\b/gi,
+  /\buh+\b/gi,
+  /\ber+\b/gi,
+  /\bah+\b/gi,
+  /\bhmm+\b/gi,
+  /\byou know\b/gi,
+  /\bi mean\b/gi,
+  /\bkind of\b/gi,
+  /\bsort of\b/gi,
+  /\bbasically\b/gi,
+  /\bactually\b/gi,
+  /\bliterally\b/gi,
+];
+
+const UNCERTAIN_TONE_PATTERNS = [
+  /\bi guess\b/gi,
+  /\bmaybe\b/gi,
+  /\bprobably\b/gi,
+  /\bi think maybe\b/gi,
+  /\bstuff\b/gi,
+  /\bthings like that\b/gi,
+  /\bwhatever\b/gi,
+];
+
+function countPatternMatches(text: string, patterns: RegExp[]) {
+  return patterns.reduce((total, pattern) => {
+    const matches = text.match(pattern);
+    return total + (matches?.length || 0);
+  }, 0);
+}
+
+function buildSpeechDeliveryMetrics(
+  answer: string,
+  durationSeconds?: number | null,
+): SpeechDeliveryMetrics | null {
+  if (!durationSeconds || durationSeconds <= 5) {
+    return null;
+  }
+
+  const words = normalizedAnswerWords(answer);
+  const totalWords = words.length;
+  const fillerCount = countPatternMatches(answer, FILLER_PATTERNS);
+  const fillerRatePer100Words = totalWords ? (fillerCount / totalWords) * 100 : 0;
+  const wordsPerMinute = (totalWords / durationSeconds) * 60;
+
+  const fillerPenalty = Math.min(fillerRatePer100Words * 0.45, 3.8);
+  const fluencyScore = clamp(9.2 - fillerPenalty, 1, 10);
+
+  const paceScore = wordsPerMinute
+    ? clamp(
+        wordsPerMinute < 85
+          ? 7.2 - (85 - wordsPerMinute) / 18
+          : wordsPerMinute > 185
+            ? 7.8 - (wordsPerMinute - 185) / 25
+            : 9.1 - Math.abs(wordsPerMinute - 135) / 80,
+        1,
+        10,
+      )
+    : 7.4;
+
+  const uncertainToneCount = countPatternMatches(answer, UNCERTAIN_TONE_PATTERNS);
+  const hasConfidentStructure = containsAny(answer, [
+    "I would",
+    "I chose",
+    "I decided",
+    "because",
+    "therefore",
+    "as a result",
+    "the outcome",
+    "the tradeoff",
+  ]);
+  const toneScore = clamp(
+    7.4 + (hasConfidentStructure ? 1.2 : 0) - uncertainToneCount * 0.65,
+    1,
+    10,
+  );
+  const deliveryScore = clamp(
+    fluencyScore * 0.45 + paceScore * 0.25 + toneScore * 0.3,
+    1,
+    10,
+  );
+
+  return {
+    fillerCount,
+    fillerRatePer100Words: Number(fillerRatePer100Words.toFixed(1)),
+    wordsPerMinute: Math.round(wordsPerMinute),
+    paceScore: Number(paceScore.toFixed(1)),
+    fluencyScore: Number(fluencyScore.toFixed(1)),
+    toneScore: Number(toneScore.toFixed(1)),
+    deliveryScore: Number(deliveryScore.toFixed(1)),
+  };
 }
 
 export function assessLowQualityAnswer(answer: string) {
@@ -1027,6 +1133,7 @@ export function buildInterviewFeedback(
   currentQuestion: string,
   interviewType: string,
   visualMetrics: VisualMetrics | null,
+  speechDurationSeconds?: number | null,
 ): LiveInterviewFeedback {
   const words = wordCount(answer);
   const sentenceCount = splitSentences(answer).length;
@@ -1038,6 +1145,7 @@ export function buildInterviewFeedback(
   const technicalQuestion = isTechnicalQuestion(currentQuestion, interviewType);
   const focusedFollowUpAnswered = answersFocusedFollowUp(answer, currentQuestion);
   const hasVisualMetrics = Boolean(visualMetrics && visualMetrics.sampleCount > 0);
+  const speechMetrics = buildSpeechDeliveryMetrics(answer, speechDurationSeconds);
 
   const relevance = clamp(
     conceptQuestion
@@ -1082,15 +1190,17 @@ export function buildInterviewFeedback(
     10,
   );
 
-  const delivery = clamp(
-    hasVisualMetrics && visualMetrics
-      ? 3 +
-          visualMetrics.averageEyeContactScore / 20 +
-          visualMetrics.steadyRatio * 2
-      : 6.2,
-    1,
-    10,
-  );
+  const delivery = speechMetrics
+    ? speechMetrics.deliveryScore
+    : clamp(
+        hasVisualMetrics && visualMetrics
+          ? 3 +
+              visualMetrics.averageEyeContactScore / 20 +
+              visualMetrics.steadyRatio * 2
+          : 6.2,
+        1,
+        10,
+      );
 
   const visualPresence = clamp(
     hasVisualMetrics && visualMetrics
@@ -1177,6 +1287,28 @@ export function buildInterviewFeedback(
     }
   }
 
+  if (!lowQuality.isLowQuality && speechMetrics) {
+    if (speechMetrics.fillerRatePer100Words <= 2) {
+      strengths.push("Your spoken delivery was fluent with very few filler words.");
+    } else if (speechMetrics.fillerRatePer100Words >= 6) {
+      improvements.push("Reduce filler words such as um, uh, you know, and basically to sound more confident.");
+    }
+
+    if (speechMetrics.wordsPerMinute) {
+      if (speechMetrics.paceScore >= 8) {
+        strengths.push("Your speaking pace was clear and easy to follow.");
+      } else if (speechMetrics.wordsPerMinute < 85) {
+        improvements.push("Increase your speaking pace slightly so the answer sounds more fluent and confident.");
+      } else if (speechMetrics.wordsPerMinute > 185) {
+        improvements.push("Slow down slightly so the interviewer can follow each point.");
+      }
+    }
+
+    if (speechMetrics.toneScore < 7) {
+      improvements.push("Use more confident wording and avoid uncertain phrases like maybe, I guess, or stuff.");
+    }
+  }
+
   return {
     totalScore,
     relevance: Number(relevance.toFixed(1)),
@@ -1191,6 +1323,7 @@ export function buildInterviewFeedback(
     includesExample: hasExample,
     includesOutcome: hasOutcome,
     visualMetrics: hasVisualMetrics ? visualMetrics : null,
+    speechMetrics,
   };
 }
 
@@ -1259,6 +1392,63 @@ export function buildSessionInterviewFeedback(
         averageEyeContactScore: Math.round(
           visualEntries.reduce((total, metric) => total + metric.averageEyeContactScore, 0) /
             visualEntries.length,
+        ),
+      }
+    : null;
+  const speechEntries = entries
+    .map((entry) => entry.feedback.speechMetrics)
+    .filter((metric): metric is SpeechDeliveryMetrics => Boolean(metric));
+  const averagedSpeechMetrics = speechEntries.length
+    ? {
+        fillerCount: speechEntries.reduce(
+          (total, metric) => total + metric.fillerCount,
+          0,
+        ),
+        fillerRatePer100Words: Number(
+          (
+            speechEntries.reduce(
+              (total, metric) => total + metric.fillerRatePer100Words,
+              0,
+            ) / speechEntries.length
+          ).toFixed(1),
+        ),
+        wordsPerMinute: (() => {
+          const pacedEntries = speechEntries.filter(
+            (metric) => typeof metric.wordsPerMinute === "number",
+          );
+
+          return pacedEntries.length
+            ? Math.round(
+                pacedEntries.reduce(
+                  (total, metric) => total + Number(metric.wordsPerMinute),
+                  0,
+                ) / pacedEntries.length,
+              )
+            : null;
+        })(),
+        paceScore: Number(
+          (
+            speechEntries.reduce((total, metric) => total + metric.paceScore, 0) /
+            speechEntries.length
+          ).toFixed(1),
+        ),
+        fluencyScore: Number(
+          (
+            speechEntries.reduce((total, metric) => total + metric.fluencyScore, 0) /
+            speechEntries.length
+          ).toFixed(1),
+        ),
+        toneScore: Number(
+          (
+            speechEntries.reduce((total, metric) => total + metric.toneScore, 0) /
+            speechEntries.length
+          ).toFixed(1),
+        ),
+        deliveryScore: Number(
+          (
+            speechEntries.reduce((total, metric) => total + metric.deliveryScore, 0) /
+            speechEntries.length
+          ).toFixed(1),
         ),
       }
     : null;
@@ -1360,5 +1550,6 @@ export function buildSessionInterviewFeedback(
     includesExampleRate,
     includesOutcomeRate,
     visualMetrics: averagedVisualMetrics,
+    speechMetrics: averagedSpeechMetrics,
   };
 }
