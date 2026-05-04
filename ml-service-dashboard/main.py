@@ -8,8 +8,8 @@ import numpy as np
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 app = FastAPI(title="Interview Coach ML Service")
 
@@ -21,7 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-semantic_model: SentenceTransformer | None = None
 PROGRESS_MODEL_PATH = Path(__file__).with_name("progress_model.joblib")
 progress_artifact = joblib.load(PROGRESS_MODEL_PATH) if PROGRESS_MODEL_PATH.exists() else None
 
@@ -29,12 +28,6 @@ progress_artifact = joblib.load(PROGRESS_MODEL_PATH) if PROGRESS_MODEL_PATH.exis
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-@app.on_event("startup")
-def warm_semantic_model():
-    model = get_semantic_model()
-    model.encode(["warmup"])
 
 
 class EvaluationRequest(BaseModel):
@@ -72,13 +65,6 @@ def normalize_skill(value: Any) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
-
-
-def get_semantic_model() -> SentenceTransformer:
-    global semantic_model
-    if semantic_model is None:
-        semantic_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return semantic_model
 
 
 def extract_attempts(data: ProgressRequest) -> list[dict[str, Any]]:
@@ -212,16 +198,23 @@ def recommendation_from_insights(readiness: str, trend: str, skills: dict[str, A
 
 @app.post("/evaluate-challenge")
 def evaluate_challenge(data: EvaluationRequest):
-    model = get_semantic_model()
     evaluation_context = data.evaluation_context or (
         f"{data.question}\n{data.expected_answer}"
     )
-    expected_embedding, user_embedding, context_embedding = model.encode(
+    vectorizer = TfidfVectorizer(
+        lowercase=True,
+        stop_words="english",
+        ngram_range=(1, 2),
+        max_features=5000,
+    )
+    expected_vector, user_vector, context_vector = vectorizer.fit_transform(
         [data.expected_answer, data.user_answer, evaluation_context]
     )
 
-    quality_similarity = cosine_similarity([user_embedding], [expected_embedding])[0][0]
-    relevance_similarity = cosine_similarity([user_embedding], [context_embedding])[0][0]
+    raw_quality_similarity = cosine_similarity(user_vector, expected_vector)[0][0]
+    raw_relevance_similarity = cosine_similarity(user_vector, context_vector)[0][0]
+    quality_similarity = float(np.sqrt(max(raw_quality_similarity, 0)))
+    relevance_similarity = float(np.sqrt(max(raw_relevance_similarity, 0)))
 
     word_count = len(data.user_answer.split())
     length_bonus = min(word_count / 140, 1) * 0.08

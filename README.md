@@ -65,7 +65,7 @@ The system is intended for students, job seekers, university career centers, and
 | Text Features | TF-IDF | Converts resume and question text into numerical features |
 | Resume Model | LinearSVC | Predicts resume/job category |
 | Question Model | TF-IDF + classifier | Predicts whether questions are technical or behavioral |
-| Semantic Evaluation | SentenceTransformer + cosine similarity | Compares answer meaning against expected content |
+| Semantic Evaluation | TF-IDF + cosine similarity | Compares answer content against expected context without heavyweight runtime dependencies |
 | Progress Model | Random Forest Regressor | Predicts the user's next expected score |
 | Readiness Model | Random Forest Classifier | Predicts readiness level from progress features |
 | Deployment | Docker / Docker Compose | Runs the frontend and ML API as reproducible services |
@@ -101,11 +101,11 @@ This makes the interview flow more balanced and prevents the system from relying
 
 ### Semantic Answer Evaluation
 
-Challenge answers are evaluated using sentence embeddings and cosine similarity. This is useful because open-ended answers can express the same idea with different wording.
+Challenge answers are evaluated using TF-IDF text features and cosine similarity against the expected answer and full challenge context. This keeps the deployed ML API lightweight and reproducible while still going beyond exact keyword matching.
 
 ```txt
 Input: question, expected answer, user answer
-Method: SentenceTransformer embeddings + cosine similarity
+Method: TF-IDF vectors + cosine similarity
 Output: relevance, semantic similarity, score, feedback
 ```
 
