@@ -101,6 +101,10 @@ BAD_QUESTION_PATTERNS = (
     "when would you use rest api over",
     "difference between rest api and",
     "api over virtual memory",
+    "mtcars",
+    "simple line ar regression",
+    "dependent variable",
+    "independent variable",
 )
 
 CONCEPT_GROUPS = {
@@ -195,6 +199,8 @@ def clean_text(value: object) -> str:
     text = str(value).strip()
     if text.lower() in {"nan", "none", "null"}:
         return ""
+    text = re.sub(r"\bper\s*-\s*forming\b", "performing", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bline\s+ar\b", "linear", text, flags=re.IGNORECASE)
     return text
 
 

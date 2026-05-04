@@ -89,6 +89,13 @@ const FALLBACK_SOFTWARE_QUESTIONS: QuestionDetail[] = [
   },
 ];
 
+const BAD_QUESTION_PATTERNS = [
+  "mtcars",
+  "simple line ar regression",
+  "dependent variable",
+  "independent variable",
+];
+
 const PYTHON_COMMANDS =
   process.platform === "win32"
     ? [["py"], ["python"], ["python3"]]
@@ -184,7 +191,11 @@ function dedupeQuestions(questions: QuestionDetail[]) {
       source === "full_interview_questions_dataset" &&
       (/difference between/i.test(text) || /\bwhen would you use\b.+\bover\b/i.test(text));
 
-    if (syntheticComparison || isBadComparisonQuestion(text)) {
+    const hasBadPattern = BAD_QUESTION_PATTERNS.some((pattern) =>
+      text.toLowerCase().includes(pattern),
+    );
+
+    if (hasBadPattern || syntheticComparison || isBadComparisonQuestion(text)) {
       continue;
     }
 
